@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -41,8 +42,44 @@ class Deployment:
         result = subprocess.run(arguments, cwd=self.root, capture_output=True, text=True,
                                 env=environment or dict(os.environ, GIT_TERMINAL_PROMPT='0'), pass_fds=pass_fds)
         if result.returncode:
+            if step == 'exact_commit_checkout':
+                # Classify only known Git failures; stderr may contain private paths.
+                for marker, reason in (
+                    ('Permission denied', 'checkout_permission_denied'),
+                    ('dubious ownership', 'checkout_git_ownership'),
+                    ('File exists', 'checkout_git_lock_conflict'),
+                    ('would be overwritten', 'checkout_local_files_conflict'),
+                ):
+                    if marker in result.stderr:
+                        raise DeploymentFailure(reason)
             raise DeploymentFailure(step)
         return result.stdout.strip()
+
+    def preserve_local_readme(self):
+        """Preserve a legacy ignored README before it becomes a tracked file.
+
+        Other ignored files (especially environment/media files) are never moved.
+        Git retains --no-overwrite-ignore for every checkout.
+        """
+        source = self.root / 'README.md'
+        if not source.exists() and not source.is_symlink():
+            return
+        if self.command(['git', 'ls-files', '-z', '--', 'README.md'], 'readme_tracking_check'):
+            return
+        incoming = self.command(['git', 'ls-tree', '-z', self.sha, '--', 'README.md'], 'incoming_readme_check')
+        if not incoming:
+            return
+        if not re.fullmatch(r'100644 blob [a-f0-9]{40}\tREADME\.md\0', incoming):
+            raise DeploymentFailure('incoming_readme_not_regular')
+        if self.command(['git', 'check-ignore', '--', 'README.md'], 'local_readme_not_ignored') != 'README.md':
+            raise DeploymentFailure('local_readme_not_ignored')
+        if not stat.S_ISREG(source.lstat().st_mode):
+            raise DeploymentFailure('local_readme_not_regular')
+        if not self.directory.resolve().is_relative_to(self.root.resolve()):
+            raise DeploymentFailure('readme_backup_path_outside_project')
+        backup = Path(tempfile.mkdtemp(prefix='legacy-readme-', dir=self.directory))
+        source.rename(backup / 'README.md')
+        print('DEPLOY|local_readme_preserved', flush=True)
 
     def compose(self):
         return ['docker', 'compose', '--env-file', '.env.production', '-f', 'compose.yaml',
@@ -159,6 +196,7 @@ class Deployment:
             self.command(['git', 'merge-base', '--is-ancestor', self.sha, 'origin/main'], 'requested_commit_not_on_main')
             self.command(['git', 'merge-base', '--is-ancestor', self.previous, self.sha], 'stale_deployment_refused')
             self.clean()
+            self.preserve_local_readme()
             self.command(['git', 'switch', '--detach', '--no-overwrite-ignore', self.sha], 'exact_commit_checkout')
             self.changed = True
             self.phase = 'compose'

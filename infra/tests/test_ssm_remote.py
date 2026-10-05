@@ -2,11 +2,13 @@
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ssm_remote
@@ -126,6 +128,84 @@ class RemoteDeploymentTests(unittest.TestCase):
         self.assertEqual(self.execute(), 1)
         self.assertFalse(self.deployment.changed)
         self.deployment.run_compose_deploy.assert_not_called()
+
+
+class CheckoutPreservationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Synthetic Test')
+        self.git('config', 'user.email', 'synthetic@example.invalid')
+        (self.root / '.gitignore').write_text('*.md\n*.local\n.env*\nartifacts/\n')
+        self.git('add', '.gitignore')
+        self.git('commit', '-qm', 'Synthetic baseline')
+        self.previous = self.git('rev-parse', 'HEAD')
+        (self.root / 'README.md').write_text('Versioned README')
+        (self.root / 'runtime.local').write_text('Versioned runtime')
+        self.git('add', '-f', 'README.md', 'runtime.local')
+        self.git('commit', '-qm', 'Synthetic incoming source')
+        self.sha = self.git('rev-parse', 'HEAD')
+        self.git('switch', '--detach', self.previous)
+        self.deployment = ssm_remote.Deployment(self.root, self.sha, 'synthetic/project')
+        self.deployment.directory.mkdir(parents=True, mode=0o700)
+
+    def git(self, *arguments):
+        return subprocess.check_output(['git', *arguments], cwd=self.root, stderr=subprocess.DEVNULL, text=True).strip()
+
+    def preserve(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.deployment.preserve_local_readme()
+
+    def test_real_ignored_readme_collision_is_preserved_and_checkout_succeeds(self):
+        (self.root / 'README.md').write_text('Existing local notes')
+        environment = self.root / '.env.production'
+        environment.write_text('PUBLIC_HOST=example.invalid\n')
+        blocked = subprocess.run(['git', 'switch', '--detach', '--no-overwrite-ignore', self.sha], cwd=self.root, capture_output=True)
+        self.assertNotEqual(blocked.returncode, 0)
+        self.preserve()
+        backups = list(self.deployment.directory.glob('legacy-readme-*/README.md'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), 'Existing local notes')
+        if os.name == 'posix':
+            self.assertEqual(backups[0].parent.stat().st_mode & 0o777, 0o700)
+        self.git('switch', '--detach', '--no-overwrite-ignore', self.sha)
+        self.assertEqual((self.root / 'README.md').read_text(), 'Versioned README')
+        self.assertEqual(environment.read_text(), 'PUBLIC_HOST=example.invalid\n')
+        self.assertEqual(self.git('status', '--porcelain'), '')
+        self.preserve()  # Tracked README is never moved on later deployments.
+        self.assertEqual(list(self.deployment.directory.glob('legacy-readme-*/README.md')), backups)
+
+    def test_other_ignored_files_are_not_overwritten_or_moved(self):
+        (self.root / 'README.md').write_text('Existing local notes')
+        runtime = self.root / 'runtime.local'
+        runtime.write_text('Existing runtime configuration')
+        self.preserve()
+        with self.assertRaisesRegex(ssm_remote.DeploymentFailure, 'checkout_local_files_conflict'):
+            self.deployment.command(['git', 'switch', '--detach', '--no-overwrite-ignore', self.sha], 'exact_commit_checkout')
+        self.assertEqual(runtime.read_text(), 'Existing runtime configuration')
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.previous)
+
+    @unittest.skipUnless(os.name == 'posix', 'Symlink checks require Linux')
+    def test_symlink_readme_is_rejected_without_touching_target(self):
+        target = self.root / 'notes.local'
+        target.write_text('Existing local notes')
+        (self.root / 'README.md').symlink_to(target)
+        with self.assertRaisesRegex(ssm_remote.DeploymentFailure, 'local_readme_not_regular'):
+            self.preserve()
+        self.assertEqual(target.read_text(), 'Existing local notes')
+        self.assertTrue((self.root / 'README.md').is_symlink())
+
+    def test_permission_and_lock_errors_use_safe_markers_without_stderr(self):
+        for message, reason in (
+            ('fatal: Permission denied /private/file', 'checkout_permission_denied'),
+            ('fatal: dubious ownership /private/repo', 'checkout_git_ownership'),
+            ('fatal: index.lock File exists /private/repo', 'checkout_git_lock_conflict'),
+        ):
+            with self.subTest(reason=reason), patch('ssm_remote.subprocess.run', return_value=Mock(returncode=1, stderr=message)):
+                with self.assertRaisesRegex(ssm_remote.DeploymentFailure, '^' + reason + '$'):
+                    self.deployment.command(['git', 'switch'], 'exact_commit_checkout')
 
 
 if __name__ == '__main__':
