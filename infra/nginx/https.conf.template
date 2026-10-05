@@ -1,0 +1,30 @@
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+include /etc/nginx/snippets/upstream.conf;
+log_format operational '$time_iso8601 method=$request_method status=$status bytes=$body_bytes_sent duration=$request_time';
+server {
+    listen 80 default_server;
+    server_name _;
+    access_log off;
+    return 444;
+}
+server {
+    listen 80;
+    server_name ${PUBLIC_HOST};
+    access_log /dev/stdout operational;
+    error_log /dev/null;
+    location ^~ /.well-known/acme-challenge/ { root /var/www/acme; }
+    location = /api/health/ { proxy_pass http://emergency_backend; proxy_set_header Host $host; }
+    location / { return 308 https://${PUBLIC_HOST}:${HTTPS_PORT}$request_uri; }
+}
+server {
+    listen 443 ssl default_server;
+    server_name ${PUBLIC_HOST};
+    ssl_certificate /etc/letsencrypt/live/${PUBLIC_HOST}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PUBLIC_HOST}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    if ($host != ${PUBLIC_HOST}) { return 444; }
+    include /etc/nginx/snippets/emergency.conf;
+}

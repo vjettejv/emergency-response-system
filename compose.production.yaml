@@ -1,0 +1,93 @@
+# Merge with compose.yaml; requires Docker Compose >=2.24.4 (!override/!reset).
+# No local database starts in production. POSTGRES_HOST must point to private RDS.
+x-runtime: &runtime
+  image: ${APP_IMAGE:-emergency-backend}:${APP_TAG:-latest}
+  env_file: !override [.env.production]
+  restart: unless-stopped
+  init: true
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  volumes: !override
+    - static_data:/app/staticfiles
+    - ./.certificates:/etc/emergency/certificates:ro
+  depends_on: !override
+    redis:
+      condition: service_healthy
+    initialize:
+      condition: service_completed_successfully
+  logging: &logging
+    driver: local
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  db:
+    profiles: [development]
+    ports: !reset []
+  redis:
+    restart: unless-stopped
+    logging: *logging
+  initialize:
+    <<: *runtime
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+    restart: "no"
+    depends_on: !override
+      redis:
+        condition: service_healthy
+    command: ["sh", "-ec", "python manage.py check --deploy && python manage.py migrate --noinput && python manage.py collectstatic --noinput"]
+  backend:
+    <<: *runtime
+    ports: !reset []
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "--access-log", "/dev/null", "config.asgi:application"]
+    healthcheck:
+      test: ["CMD", "python", "config/container_health.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+  worker:
+    <<: *runtime
+    command: ["celery", "-A", "config", "worker", "--loglevel=INFO", "--concurrency=2"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping --destination celery@$$HOSTNAME --timeout=3 | grep -q pong"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+  beat:
+    <<: *runtime
+    command: ["celery", "-A", "config", "beat", "--loglevel=INFO", "--schedule=/var/lib/celery/celerybeat-schedule", "--pidfile="]
+    volumes: !override
+      - static_data:/app/staticfiles
+      - ./.certificates:/etc/emergency/certificates:ro
+      - beat_data:/var/lib/celery
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    ports: ["${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"]
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST to the public domain or IP}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+    volumes:
+      - ./infra/nginx/http.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./infra/nginx/common.conf:/etc/nginx/snippets/emergency.conf:ro
+      - ./infra/nginx/upstream.conf:/etc/nginx/snippets/upstream.conf:ro
+      - static_data:/srv/static:ro
+      - ./infra/acme:/var/www/acme:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null --header='Host: '$$PUBLIC_HOST http://127.0.0.1/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging: *logging
+
+volumes:
+  static_data:
+  beat_data:

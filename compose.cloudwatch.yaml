@@ -1,0 +1,21 @@
+# Optional override; create log group/retention and EC2 role before enabling.
+x-cloudwatch-options: &cloudwatch-options
+  awslogs-region: ${AWS_REGION:?Set AWS_REGION}
+  awslogs-group: ${CLOUDWATCH_LOG_GROUP:?Create CLOUDWATCH_LOG_GROUP first}
+  awslogs-create-group: "false"
+  tag: "{{.Name}}"
+  mode: non-blocking
+  max-buffer-size: "4m"
+services:
+  initialize:
+    logging: !override {driver: awslogs, options: *cloudwatch-options}
+  backend:
+    logging: !override {driver: awslogs, options: *cloudwatch-options}
+  worker:
+    logging: !override {driver: awslogs, options: *cloudwatch-options}
+  beat:
+    logging: !override {driver: awslogs, options: *cloudwatch-options}
+  redis:
+    logging: !override {driver: awslogs, options: *cloudwatch-options}
+  nginx:
+    logging: !override {driver: awslogs, options: *cloudwatch-options}

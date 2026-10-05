@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#142e47">
+    <title>Ứng phó · Trung tâm sự cố</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <link rel="stylesheet" href="/realtime/style.css">
+    <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script defer src="/realtime/client.js"></script><script defer src="/realtime/map.js"></script><script defer src="/realtime/app.js"></script>
+</head>
+<body>
+    <a href="#content" class="skip">Đến nội dung</a>
+    <div id="app"><p class="initial" role="status">Đang mở hệ thống ứng phó…</p></div>
+    <div id="notifications" aria-live="polite" aria-atomic="true"></div>
+    <dialog id="confirm-dialog" aria-labelledby="confirm-title"><form method="dialog"><h2 id="confirm-title">Xác nhận thao tác</h2><p id="confirm-text"></p><div class="actions"><button value="cancel" class="secondary">Quay lại</button><button value="confirm">Xác nhận</button></div></form></dialog>
+</body>
+</html>

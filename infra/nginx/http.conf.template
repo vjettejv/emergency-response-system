@@ -1,0 +1,18 @@
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+include /etc/nginx/snippets/upstream.conf;
+# No IP, query string, request body, Authorization, Referer or User-Agent.
+log_format operational '$time_iso8601 method=$request_method status=$status bytes=$body_bytes_sent duration=$request_time';
+server {
+    listen 80 default_server;
+    server_name _;
+    access_log off;
+    return 444;
+}
+server {
+    listen 80;
+    server_name ${PUBLIC_HOST};
+    include /etc/nginx/snippets/emergency.conf;
+}

@@ -1,0 +1,11 @@
+{
+  "agent": {"metrics_collection_interval": 60, "run_as_user": "cwagent"},
+  "metrics": {
+    "namespace": "Emergency/EC2",
+    "append_dimensions": {"InstanceId": "${aws:InstanceId}"},
+    "metrics_collected": {
+      "mem": {"measurement": ["mem_used_percent"]},
+      "disk": {"resources": ["/"], "measurement": ["used_percent"]}
+    }
+  }
+}
