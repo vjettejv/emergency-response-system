@@ -35,7 +35,11 @@ def settings(environment):
 
 def command_body(configuration, source):
     arguments = ' '.join(shlex.quote(configuration[name]) for name in ('path', 'sha', 'repository'))
-    return "sudo -u ubuntu -H /usr/bin/python3 - " + arguments + " <<'ERS_SSM_PYTHON'\n" + source + '\nERS_SSM_PYTHON\n'
+    preparation = Path(__file__).with_name('ssm_prepare.py').read_text()
+    return ("set -e\n/usr/bin/python3 - " + shlex.quote(configuration['path']) + " <<'ERS_PREPARE_PYTHON'\n"
+            + preparation + '\nERS_PREPARE_PYTHON\n'
+            + "sudo -u ubuntu -H /usr/bin/python3 - " + arguments + " <<'ERS_SSM_PYTHON'\n"
+            + source + '\nERS_SSM_PYTHON\n')
 
 
 def aws(configuration, arguments, allow_missing=False):
@@ -55,7 +59,7 @@ def aws(configuration, arguments, allow_missing=False):
 def print_safe_output(invocation):
     allowed = {'DEPLOY|compose_starting', 'DEPLOY|containers_and_https_ok', 'ROLLBACK|starting',
                'ROLLBACK|containers_and_https_ok', 'DEPLOY|another_deployment_is_active', 'DEPLOY|must_run_as_ubuntu',
-               'DEPLOY|internal_failure_requires_manual_inspection'}
+               'DEPLOY|internal_failure_requires_manual_inspection', 'DEPLOY|legacy_lock_ownership_repaired'}
     for name in ('StandardOutputContent', 'StandardErrorContent'):
         for line in invocation.get(name, '').splitlines():
             if line in allowed or re.fullmatch(r'DEPLOY\|failed_step=[a-z_]+', line):
