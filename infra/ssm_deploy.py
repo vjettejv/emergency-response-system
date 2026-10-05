@@ -44,7 +44,11 @@ def aws(configuration, arguments, allow_missing=False):
     if result.returncode:
         if allow_missing and 'InvocationDoesNotExist' in result.stderr:
             return None
-        raise DeploymentError('AWS SSM API request failed; verify IAM and Managed Node readiness.')
+        allowed = ('AccessDeniedException', 'InvalidInstanceId', 'InvalidDocument', 'ExpiredTokenException',
+                   'ThrottlingException', 'TargetNotConnected')
+        code = next((name for name in allowed if name in result.stderr), 'UnknownAWSFailure')
+        operation = next((name for name in ('send-command', 'get-command-invocation') if name in arguments), 'request')
+        raise DeploymentError('AWS SSM ' + operation + ' failed: ' + code + '; verify IAM and Managed Node readiness.')
     return result.stdout.strip()
 
 

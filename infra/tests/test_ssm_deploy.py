@@ -58,6 +58,15 @@ class SSMClientTests(unittest.TestCase):
                                          'StandardErrorContent': 'signed download URL or raw exception'})
         self.assertEqual(output.getvalue().strip(), 'DEPLOY|compose_starting')
 
+    @patch('ssm_deploy.subprocess.run')
+    def test_api_failure_exposes_only_error_code(self, process):
+        process.return_value.returncode = 1
+        process.return_value.stderr = 'An error occurred (InvalidInstanceId): private response values'
+        with self.assertRaises(ssm_deploy.DeploymentError) as raised:
+            ssm_deploy.aws(self.configuration, ['ssm', 'send-command'])
+        self.assertIn('InvalidInstanceId', str(raised.exception))
+        self.assertNotIn('private response values', str(raised.exception))
+
     def test_poll_deadline_is_enforced(self):
         with self.assertRaises(ssm_deploy.DeploymentError):
             ssm_deploy.wait_for_command(self.configuration, 'command', timeout=0)
