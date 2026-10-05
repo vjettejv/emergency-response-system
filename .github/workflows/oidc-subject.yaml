@@ -1,0 +1,40 @@
+name: Verify production OIDC subject
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Read actual branch subject without logging the token
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          from urllib.request import Request, urlopen
+          from urllib.parse import urlencode
+          endpoint = os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']
+          endpoint += ('&' if '?' in endpoint else '?') + urlencode({'audience': 'sts.amazonaws.com'})
+          request = Request(endpoint, headers={'Authorization': 'Bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+          try:
+              with urlopen(request, timeout=20) as response:
+                  token = json.load(response)['value']
+              payload = token.split('.')[1]
+              claims = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+          except Exception:
+              raise SystemExit('OIDC inspection failed; no credential data printed.')
+          assert claims['aud'] == 'sts.amazonaws.com'
+          assert claims['ref'] == 'refs/heads/main'
+          assert claims['repository'] == os.environ['GITHUB_REPOSITORY']
+          print('OIDC_CLAIMS=' + json.dumps({name: claims.get(name) for name in
+              ('aud', 'sub', 'ref', 'repository', 'repository_id', 'repository_owner_id')}, sort_keys=True))
+          PY
