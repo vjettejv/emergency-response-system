@@ -15,6 +15,19 @@ import ssm_remote
 
 @unittest.skipUnless(os.name == 'posix', 'EC2/Actions use Linux flock')
 class DeploymentLockTests(unittest.TestCase):
+    def test_unwritable_legacy_lock_is_reported_before_deployment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / '.git').mkdir()
+            (root / '.deploy.lock').touch()
+            output = io.StringIO()
+            with patch('pwd.getpwuid', return_value=SimpleNamespace(pw_name='ubuntu')), \
+                    patch('ssm_remote.os.access', side_effect=lambda path, mode: path.name != '.deploy.lock'), \
+                    patch('ssm_remote.Deployment.execute') as execute, contextlib.redirect_stdout(output):
+                self.assertEqual(ssm_remote.main([str(root), 'a' * 40, 'vjettejv/emergency-response-system']), 1)
+            execute.assert_not_called()
+            self.assertIn('deploy_lock_not_writable_by_ubuntu', output.getvalue())
+
     def test_existing_cd_and_manual_deploy_locks_prevent_source_changes(self):
         import fcntl
         for name in ('.cd.lock', '.deploy.lock'):

@@ -198,6 +198,14 @@ def main(arguments):
     if not path.is_absolute() or path.resolve() != path or not (path / '.git').is_dir():
         return 1
     try:
+        # Old manual deployments may have left root-owned lock/state files.
+        # Report only the affected operation, never exception/path contents.
+        targets = {'repository': path, 'cd_lock': path / '.cd.lock',
+                   'deploy_lock': path / '.deploy.lock', 'artifacts': path / 'artifacts',
+                   'deployment_state': path / 'artifacts' / 'deploy'}
+        for name, target in targets.items():
+            if target.exists() and not os.access(target, os.W_OK):
+                raise DeploymentFailure(name + '_not_writable_by_ubuntu')
         with (path / '.cd.lock').open('a') as cd_lock, (path / '.deploy.lock').open('a') as deploy_lock:
             fcntl.flock(cd_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             fcntl.flock(deploy_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -208,7 +216,9 @@ def main(arguments):
     except DeploymentFailure as error:
         print('DEPLOY|failed_step=' + str(error), flush=True)
         return 1
-    except Exception:
+    except Exception as error:
+        if isinstance(error, PermissionError):
+            print('DEPLOY|failed_step=filesystem_permission_denied', flush=True)
         print('DEPLOY|internal_failure_requires_manual_inspection', flush=True)
         return 1
 
