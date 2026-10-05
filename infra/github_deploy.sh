@@ -12,12 +12,15 @@ chmod 700 "$private_dir"
 printf '%s\n' "$EC2_SSH_KEY" > "$private_dir/key"
 printf '%s\n' "$EC2_KNOWN_HOSTS" > "$private_dir/known_hosts"
 chmod 600 "$private_dir/key" "$private_dir/known_hosts"
-# Values are shell-quoted and sent only through encrypted stdin, never arguments/logs.
-{
-    printf 'export GH_TOKEN=%q REPOSITORY=%q EXPECTED_SHA=%q\n' "$GH_TOKEN" "$REPOSITORY" "$EXPECTED_SHA"
-    cat infra/remote_deploy.sh
-} | ssh -i "$private_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes \
+# The forced command accepts bounded JSON only, never shell code or token arguments.
+python3 - <<'PY' | ssh -i "$private_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes \
     -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$private_dir/known_hosts" \
     -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
     "$EC2_USER@$EC2_HOST" \
-    "set -eu; remote_script=\$(mktemp); chmod 700 \"\$remote_script\"; trap 'rm -f -- \"\$remote_script\"' EXIT; cat > \"\$remote_script\"; bash \"\$remote_script\" < /dev/null"
+    ers-deploy
+import json
+import os
+import sys
+json.dump({'repository': os.environ['REPOSITORY'], 'expected_sha': os.environ['EXPECTED_SHA'],
+           'github_token': os.environ['GH_TOKEN']}, sys.stdout)
+PY

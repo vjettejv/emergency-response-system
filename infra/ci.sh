@@ -21,6 +21,7 @@ for name in ('.env', '.env.production'):
         stream.write('\n'.join(lines) + '\n')
 PY
 python3 infra/check_repository.py --history
+python3 -m unittest discover -s infra/tests
 docker compose config --quiet
 docker compose --env-file .env.production -f compose.yaml -f compose.production.yaml -f compose.https.yaml -f compose.cloudwatch.yaml config --quiet
 docker compose build backend worker beat
