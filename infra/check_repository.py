@@ -26,7 +26,7 @@ def git(*arguments):
 
 def forbidden(name):
     path = PurePosixPath(name)
-    return (bool(set(path.parts) & FORBIDDEN_DIRS) or path.suffix.lower() in FORBIDDEN_SUFFIXES
+    return (bool(set(path.parts) & FORBIDDEN_DIRS) or (path.suffix.lower() in FORBIDDEN_SUFFIXES and name != 'README.md')
             or (path.name.startswith('.env') and name not in EXAMPLES)
             or path.name in {'credentials', '.deploy.lock', '.cd.lock'}
             or (name.startswith('infra/') and (path.name.startswith(('s3-cors', 'ec2-role-policy'))

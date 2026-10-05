@@ -65,6 +65,7 @@ bao-cao/
 *.pptx
 *.ppt
 *.md
+!README.md
 # These JSON files are Console setup examples, not read by runtime or CI/CD.
 infra/ec2-role-policy*.json
 infra/s3-cors*.json
