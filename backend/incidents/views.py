@@ -63,7 +63,7 @@ class ReportViewSet(
         return super().filter_queryset(queryset) if self.action == "list" else queryset
 
     def create(self, request, *args, **kwargs):
-        serializer = ReportCreateSerializer(data=request.data)
+        serializer = ReportCreateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         report = services.submit_report(actor=request.user, **serializer.validated_data)
         data = ReportSerializer(report).data
@@ -72,7 +72,7 @@ class ReportViewSet(
 
     @action(detail=False, methods=["post"])
     def drafts(self, request):
-        serializer = DraftReportSerializer(data=request.data)
+        serializer = DraftReportSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
         request_id = values.pop("request_id")

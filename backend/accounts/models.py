@@ -18,6 +18,7 @@ class AccountManager(UserManager):
 
 
 class User(AbstractUser):
+    phone = models.CharField(max_length=16, blank=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.CITIZEN)
     response_team = models.ForeignKey(
         "teams.ResponseTeam",

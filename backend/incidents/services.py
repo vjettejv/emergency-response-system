@@ -44,6 +44,8 @@ def finalize_report(*, actor, report_id):
         raise NotFound("Draft not found.")
     if not report.is_draft:
         return report
+    if not report.reporter_name.strip() or not report.reporter_phone:
+        raise Conflict("Add a reporter name and phone before sending the draft.")
     if not report.category.is_active:
         raise Conflict("Choose an active category before sending the draft.")
     if report.media_assets.select_for_update().exclude(status__in=["ready", "deleting", "deleted", "failed"]).exists():
@@ -71,7 +73,7 @@ def locked_object(model, pk):
 
 @transaction.atomic
 def submit_report(*, actor, category, description, location, address="", occurred_at=None, media_metadata=None,
-                  reporter_name="", reporter_phone="", allow_contact=False, location_accuracy=None):
+                  reporter_name="", reporter_phone="", allow_contact=True, location_accuracy=None, gps_location=None):
     """Accept serializer-validated input; keep ownership and review fields server-owned."""
     require_role(actor, (Role.CITIZEN,))
     if not category.is_active:
@@ -80,7 +82,7 @@ def submit_report(*, actor, category, description, location, address="", occurre
         reporter=actor, category=category, description=description, location=location,
         address=address, occurred_at=occurred_at, media_metadata=media_metadata or [],
         reporter_name=reporter_name, reporter_phone=reporter_phone,
-        allow_contact=allow_contact, location_accuracy=location_accuracy,
+        allow_contact=allow_contact, location_accuracy=location_accuracy, gps_location=gps_location,
     )
     # Local import avoids a cycle with the clustering service's permission helpers.
     from .clustering import submission_hint

@@ -9,7 +9,9 @@ from django.views.decorators.http import require_GET
 def frontend(request, asset="index.html"):
     # Public shell only. All operational data needs authenticated REST/WS access.
     if asset == "config.json":
-        return JsonResponse({"apiBase": "/api/v1/", "dispatcherSocket": "/ws/dispatcher/", "rescueSocket": "/ws/rescue/", "mediaMaxBytes": settings.MEDIA_MAX_BYTES, "gpsIntervalMs": max(10, settings.GPS_MIN_INTERVAL_SECONDS) * 1000, "tileUrl": settings.LEAFLET_TILE_URL})
+        return JsonResponse({"apiBase": "/api/v1/", "dispatcherSocket": "/ws/dispatcher/", "rescueSocket": "/ws/rescue/", "mediaMaxBytes": settings.MEDIA_MAX_BYTES, "gpsIntervalMs": max(10, settings.GPS_MIN_INTERVAL_SECONDS) * 1000, "tileUrl": settings.LEAFLET_TILE_URL,
+                             "incidentLocationDistanceWarningMeters": settings.INCIDENT_LOCATION_DISTANCE_WARNING_METERS,
+                             "cameraVideoMaxSeconds": settings.CAMERA_VIDEO_MAX_SECONDS})
     if asset not in ("index.html", "app.js", "client.js", "map.js", "style.css"):
         raise Http404
     content_type = "text/javascript" if asset.endswith(".js") else "text/css" if asset.endswith(".css") else "text/html"

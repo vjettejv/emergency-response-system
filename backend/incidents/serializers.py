@@ -1,11 +1,11 @@
 import math
 from collections.abc import Mapping
-import re
 
 from django.contrib.gis.geos import Point
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import serializers
+from common.serializers import PhoneField
 
 from .models import (
     DuplicateDismissal, Incident, IncidentCategory, IncidentReport,
@@ -53,21 +53,19 @@ class MediaMetadataSerializer(StrictSerializer):
     size_bytes = serializers.IntegerField(min_value=1, max_value=50 * 1024 * 1024)
 
 
-class PhoneField(serializers.CharField):
-    def to_internal_value(self, data):
-        value = super().to_internal_value(data)
-        if not value:
-            return value
-        value = re.sub(r"[ .()-]", "", value)
-        if not re.fullmatch(r"\+?[0-9]{8,15}", value):
-            raise serializers.ValidationError("Use 8–15 digits, optionally starting with +.")
-        return value
+class GPSLocationSerializer(StrictSerializer):
+    latitude = CoordinateField(min_value=-90, max_value=90)
+    longitude = CoordinateField(min_value=-180, max_value=180)
+
+    def validate(self, attrs):
+        return Point(attrs["longitude"], attrs["latitude"], srid=4326)
 
 
 class ReportCreateSerializer(StrictSerializer):
     reporter_name = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
     reporter_phone = PhoneField(max_length=30, required=False, allow_blank=True, default="")
-    allow_contact = serializers.BooleanField(required=False, default=False)
+    allow_contact = serializers.BooleanField(required=False, default=True)
+    gps_location = GPSLocationSerializer(required=False, allow_null=True, default=None)
     location_accuracy = CoordinateField(min_value=0, required=False, allow_null=True)
     category = serializers.PrimaryKeyRelatedField(queryset=IncidentCategory.objects.filter(is_active=True))
     description = serializers.CharField(max_length=10000)
@@ -83,8 +81,15 @@ class ReportCreateSerializer(StrictSerializer):
         return value
 
     def validate(self, attrs):
-        if attrs.get("allow_contact") and (not attrs.get("reporter_phone") or not attrs.get("reporter_name")):
-            raise serializers.ValidationError("Contact consent requires a reporter name and valid phone.")
+        actor = getattr(self.context.get("request"), "user", None)
+        if actor:
+            if "reporter_name" not in self.initial_data:
+                attrs["reporter_name"] = actor.get_full_name().strip() or actor.username
+            if "reporter_phone" not in self.initial_data:
+                attrs["reporter_phone"] = PhoneField().run_validation(actor.phone) if actor.phone else ""
+        errors = {key: "Required for emergency contact." for key in ("reporter_name", "reporter_phone") if not attrs.get(key)}
+        if errors:
+            raise serializers.ValidationError(errors)
         # GeoDjango expects x=longitude, y=latitude, never the reverse.
         attrs["location"] = Point(attrs.pop("longitude"), attrs.pop("latitude"), srid=4326)
         return attrs

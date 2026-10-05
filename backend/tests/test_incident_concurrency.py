@@ -63,6 +63,7 @@ class IncidentConcurrencyTests(TransactionTestCase):
             save_report_draft(actor=User.objects.get(pk=self.citizen.pk), request_id=request_id, values={
                 "category": self.category, "description": "Synthetic draft",
                 "location": Point(105, 21, srid=4326),
+                "reporter_name": "Synthetic Citizen", "reporter_phone": "+12025550123",
             })
 
         self.race([save, save], expected=("ok", "ok"))

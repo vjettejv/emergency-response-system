@@ -113,6 +113,7 @@ class FrontendShellTests(TestCase):
         user.refresh_from_db()
         self.assertEqual(team.status, "offline")
         self.assertTrue(user.check_password("Synthetic-modified-pass-48!"))
+        self.assertEqual(set(IncidentCategory.objects.values_list("code", flat=True)), {"fire", "traffic"})
 
 
 class PhaseSevenWorkflowTests(APITestCase):
@@ -120,7 +121,7 @@ class PhaseSevenWorkflowTests(APITestCase):
         self.category = IncidentCategory.objects.create(name="Synthetic", code="workflow")
         self.team = ResponseTeam.objects.create(name="Synthetic", code="workflow", status="available", last_location=Point(106.7, 10.77, srid=4326))
         self.team.categories.add(self.category)
-        self.citizen = User.objects.create_user(username="citizen")
+        self.citizen = User.objects.create_user(username="citizen", phone="+12025550123")
         self.dispatcher = User.objects.create_user(username="dispatcher", role=Role.DISPATCHER)
         self.rescue = User.objects.create_user(username="rescue", role=Role.RESCUE_TEAM, response_team=self.team)
 

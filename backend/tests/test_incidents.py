@@ -48,6 +48,7 @@ class IncidentAPITests(APITestCase):
         data = {
             "category": self.category.pk, "description": "Synthetic smoke report",
             "latitude": 21.01, "longitude": 105.81,
+            "reporter_name": "Synthetic Citizen", "reporter_phone": "+12025550123",
         }
         data.update(overrides)
         return data

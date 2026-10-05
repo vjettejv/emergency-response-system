@@ -111,6 +111,32 @@ class HealthAndCorsTests(TestCase):
 
 
 class DeploymentCommandsTests(TestCase):
+    def test_retiring_demo_categories_preserves_reports_and_team_capabilities(self):
+        from importlib import import_module
+        from django.apps import apps
+        from django.contrib.gis.geos import Point
+        from django.db import connection
+        from accounts.models import User
+        from incidents.models import IncidentReport
+        from teams.models import ResponseTeam
+
+        old = IncidentCategory.objects.create(code="demo-fire", name="Cháy / khói (demo)")
+        user = User.objects.create_user(username="synthetic-category-review")
+        report = IncidentReport.objects.create(reporter=user, category=old, description="Synthetic historical report", location=Point(105, 21, srid=4326))
+        team = ResponseTeam.objects.create(code="synthetic-category-review", name="Synthetic team")
+        team.categories.add(old)
+        migrate = import_module("incidents.migrations.0008_retire_demo_categories").retire_demo_categories
+        with connection.schema_editor() as editor:
+            migrate(apps, editor)
+            migrate(apps, editor)
+        old.refresh_from_db()
+        report.refresh_from_db()
+        self.assertFalse(old.is_active)
+        self.assertNotIn("demo", old.name)
+        self.assertEqual(report.category_id, old.pk)
+        self.assertTrue(team.categories.filter(code="fire").exists())
+        self.assertEqual(IncidentCategory.objects.filter(code="fire").count(), 1)
+
     def test_category_seed_is_idempotent_and_preserves_records(self):
         IncidentCategory.objects.create(code="fire", name="Locally configured name", is_active=False)
         call_command("seed_categories", stdout=io.StringIO())

@@ -24,8 +24,8 @@ class Command(BaseCommand):
             validate_password(password)
         except ValidationError as exc:
             raise CommandError("; ".join(exc.messages)) from exc
-        category, _ = IncidentCategory.objects.get_or_create(code="demo-fire", defaults={"name": "Cháy / khói (demo)", "description": "Dữ liệu mô phỏng, không phải sự cố thật."})
-        traffic, _ = IncidentCategory.objects.get_or_create(code="demo-traffic", defaults={"name": "Tai nạn giao thông (demo)", "description": "Dữ liệu mô phỏng, không phải sự cố thật."})
+        category, _ = IncidentCategory.objects.get_or_create(code="fire", defaults={"name": "Cháy nổ"})
+        traffic, _ = IncidentCategory.objects.get_or_create(code="traffic", defaults={"name": "Tai nạn giao thông"})
         team, created = ResponseTeam.objects.get_or_create(code="demo-rescue", defaults={
             "name": "Đội ứng cứu Demo", "status": ResponseTeam.Status.AVAILABLE,
             "last_location": Point(106.701, 10.776, srid=4326), "location_updated_at": timezone.now(),

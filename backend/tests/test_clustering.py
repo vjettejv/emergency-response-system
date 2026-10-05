@@ -193,6 +193,7 @@ class ClusteringTests(APITestCase):
         self.client.force_authenticate(self.citizen)
         response = self.client.post(reverse("incidents:report-list"), {
             "category": self.category.pk, "description": "Synthetic new report", "latitude": 21, "longitude": 105,
+            "reporter_name": "Synthetic Citizen", "reporter_phone": "+12025550123",
         }, format="json")
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["potential_duplicates"], {

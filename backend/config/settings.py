@@ -153,7 +153,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
-    "DEFAULT_THROTTLE_RATES": {"auth": "20/min"},
+    "DEFAULT_THROTTLE_RATES": {"auth": "20/min", "geocoding": "30/min"},
     "NUM_PROXIES": 1 if PRODUCTION else None,
 }
 LANGUAGE_CODE = "vi"
@@ -163,6 +163,11 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 LEAFLET_TILE_URL = os.environ.get("LEAFLET_TILE_URL", "https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+GEOCODER_BASE_URL = os.environ.get("GEOCODER_BASE_URL", "https://nominatim.openstreetmap.org")
+GEOCODER_USER_AGENT = os.environ.get("GEOCODER_USER_AGENT", "EmergencyResponseSystem/1.0 (+https://vjettejv.id.vn/)")
+GEOCODER_CACHE_SECONDS = positive_int_env("GEOCODER_CACHE_SECONDS", 86400)
+INCIDENT_LOCATION_DISTANCE_WARNING_METERS = positive_int_env("INCIDENT_LOCATION_DISTANCE_WARNING_METERS", 1000)
+CAMERA_VIDEO_MAX_SECONDS = positive_int_env("CAMERA_VIDEO_MAX_SECONDS", 30)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 SESSION_COOKIE_SECURE = HTTPS_ENABLED or not DEBUG
 CSRF_COOKIE_SECURE = HTTPS_ENABLED or not DEBUG

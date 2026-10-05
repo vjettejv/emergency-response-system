@@ -70,12 +70,14 @@ class IncidentReport(TimestampedModel):
     description = models.TextField()
     reporter_name = models.CharField(max_length=120, blank=True)
     reporter_phone = models.CharField(max_length=16, blank=True)
-    allow_contact = models.BooleanField(default=False)
+    # New emergency submissions imply operational contact consent. Old rows are preserved.
+    allow_contact = models.BooleanField(default=True)
     location_accuracy = models.FloatField(null=True, blank=True)
     is_draft = models.BooleanField(default=False)
     draft_request_id = models.UUIDField(null=True, blank=True, unique=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
-    location = models.PointField(srid=4326, geography=True)
+    location = models.PointField(srid=4326, geography=True)  # Incident site; all spatial services use this field.
+    gps_location = models.PointField(srid=4326, geography=True, null=True, blank=True)
     address = models.CharField(max_length=500, blank=True)
     occurred_at = models.DateTimeField(null=True, blank=True)
     media_metadata = models.JSONField(default=list, blank=True)
