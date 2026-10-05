@@ -207,23 +207,61 @@
         app.replaceChildren(node("div", {id: "ui-shell", class: `shell role-${role}${isDispatch ? " dispatch-shell" : ""}${isRescue ? " rescue-shell" : ""}`}, node("aside", {class: "sidebar"}, brand(), nav, node("div", {class: "account"}, node("div", {}, node("strong", {}, state.user.username), node("br"), node("small", {}, labels[role])), logout)), node("div", {class: "workspace"}, node("header", {class: "topbar"}, node("div", {class: "workspace-title"}, icon(isRescue ? "shield" : isDispatch ? "map" : "home"), node("strong", {}, isRescue ? "Ứng cứu hiện trường" : isDispatch ? "Trung tâm điều phối" : "Trung tâm ứng phó"), node("small", {}, labels[role])), node("div", {class: "actions"}, connection, button("Làm mới", () => refresh(true)), !isRescue ? exit : null)), state.notice, content)));
         return content;
     }
-    function brand() {
+    function brand(tagline = "KẾT NỐI - ĐIỀU PHỐI") {
         const mark = node("span", {class: "brand-icon", "aria-hidden": "true"});
         mark.innerHTML = '<svg viewBox="0 0 24 28" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 8 3.5v7c0 5-8 10-8 10s-8-5-8-10v-7L12 2Z" stroke-width="2.1"/><path d="M12 7.5v6" stroke-width="2.5"/><circle cx="12" cy="17.5" r="1.25" fill="currentColor" stroke="none"/></svg>';
-        return node("div", {class: "brand"}, mark, node("div", {}, node("strong", {}, "ỨNG PHÓ"), node("small", {}, "KẾT NỐI - ĐIỀU PHỐI")));
+        return node("div", {class: "brand"}, mark, node("div", {}, node("strong", {}, "ỨNG PHÓ"), node("small", {}, tagline)));
     }
     function login() {
-        const form = node("form"), error = errorBox(), submit = node("button", {type: "submit"}, "Đăng nhập"); let registering = false;
-        const title = node("h2", {}, "Chào mừng trở lại"), subtitle = node("p", {}, "Đăng nhập để tiếp tục vào không gian của bạn.");
-        const toggle = button("Chưa có tài khoản? Đăng ký người dân", () => { registering = !registering; title.textContent = registering ? "Tạo tài khoản người dân" : "Chào mừng trở lại"; submit.textContent = registering ? "Đăng ký" : "Đăng nhập"; toggle.textContent = registering ? "Đã có tài khoản? Đăng nhập" : "Chưa có tài khoản? Đăng ký người dân"; error.textContent = ""; });
-        form.append(field("Tên đăng nhập", "username", "text", {required: true, autoComplete: "username"}), field("Mật khẩu", "password", "password", {required: true, autoComplete: "current-password"}), error, submit);
-        form.onsubmit = event => { event.preventDefault(); perform(submit, error, async () => {
-            const data = formData(form);
-            if (registering) { await api.request("auth/register/", "POST", data); notify("Đã tạo tài khoản. Bạn có thể đăng nhập."); registering = false; submit.textContent = "Đăng nhập"; title.textContent = "Chào mừng trở lại"; toggle.textContent = "Chưa có tài khoản? Đăng ký người dân"; return; }
-            const result = await api.request("auth/login/", "POST", data); state.token = result.token; state.user = result.user; sessionStorage.setItem("emergency-token", state.token);
-            state.categories = await api.all("incident-categories/?page_size=100"); go(E.homes[state.user.role]); connectRealtime();
-        }); };
-        app.replaceChildren(node("div", {class: "login-layout"}, node("section", {class: "login-story"}, brand(), node("div", {}, node("p", {class: "eyebrow"}, "Hệ thống quản lý sự cố"), node("h1", {}, "Đúng thông tin.", node("br"), "Kịp thời ứng phó."), node("p", {}, "Kết nối người dân, điều phối viên và đội ứng cứu trong một quy trình thống nhất.")), node("div", {class: "story-foot"}, node("div", {class: "story-line"}), node("small", {}, "Báo cáo hiện trường · Điều phối lực lượng · Theo dõi thời gian thực"))), node("main", {class: "login-form", id: "content"}, panel(null, node("p", {class: "eyebrow"}, "Không gian làm việc"), title, subtitle, form, node("div", {class: "actions", style: "margin-top:20px"}, toggle)))));
+        let registering = false, busy = false, visible = false;
+        const form = node("form", {class: "auth-form"}), error = node("p", {class: "error auth-error", id: "login-error", role: "alert", "aria-live": "polite"});
+        const title = node("h2", {id: "login-title"}, "Chào mừng trở lại"), subtitle = node("p", {class: "auth-subtitle"}, "Đăng nhập để tiếp tục vào hệ thống.");
+        const username = field("Tên đăng nhập", "username", "text", {id: "login-username", required: true, autoComplete: "username", autoCapitalize: "none", spellcheck: false, "aria-describedby": "login-error"});
+        const usernameInput = username.querySelector("input"), passwordInput = node("input", {id: "login-password", name: "password", type: "password", required: true, autoComplete: "current-password", "aria-describedby": "login-error"});
+        const visibility = button("", () => {visible = !visible; updateVisibility();}); visibility.className = "auth-visibility";
+        function updateVisibility() {
+            passwordInput.type = visible ? "text" : "password";
+            visibility.setAttribute("aria-label", visible ? "Ẩn mật khẩu" : "Hiện mật khẩu");
+            visibility.setAttribute("aria-pressed", String(visible)); visibility.setAttribute("aria-controls", "login-password");
+            const eye = node("span", {class: "icon", "aria-hidden": "true"});
+            eye.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>${visible ? '<path d="m3 3 18 18"/>' : ""}</svg>`;
+            visibility.replaceChildren(eye);
+        }
+        updateVisibility();
+        const password = node("div", {class: "field auth-password"}, node("label", {htmlFor: "login-password"}, "Mật khẩu"), node("div", {class: "auth-password-control"}, passwordInput, visibility));
+        const spinner = node("span", {class: "auth-spinner", hidden: true, "aria-hidden": "true"}), submitLabel = node("span", {}, "Đăng nhập");
+        const submit = node("button", {type: "submit", class: "auth-submit"}, spinner, submitLabel);
+        const switchPrompt = node("span", {}, "Chưa có tài khoản?"), toggle = button("Đăng ký", () => {if (busy) return; registering = !registering; updateMode(); error.textContent = "";}); toggle.className = "auth-link";
+        function updateMode() {
+            title.textContent = registering ? "Tạo tài khoản người dân" : "Chào mừng trở lại";
+            subtitle.textContent = registering ? "Đăng ký để gửi và theo dõi báo cáo sự cố." : "Đăng nhập để tiếp tục vào hệ thống.";
+            submitLabel.textContent = registering ? "Tạo tài khoản" : "Đăng nhập";
+            switchPrompt.textContent = registering ? "Đã có tài khoản?" : "Chưa có tài khoản?"; toggle.textContent = registering ? "Đăng nhập" : "Đăng ký";
+            if (registering) passwordInput.setAttribute("autocomplete", "new-password");
+            else passwordInput.setAttribute("autocomplete", "current-password");
+            visible = false; updateVisibility();
+        }
+        form.append(username, password, error, submit);
+        form.onsubmit = async event => {
+            event.preventDefault(); if (busy) return; busy = true;
+            form.setAttribute("aria-busy", "true"); toggle.disabled = true; usernameInput.readOnly = true; passwordInput.readOnly = true;
+            spinner.hidden = false; submitLabel.textContent = registering ? "Đang tạo tài khoản…" : "Đang đăng nhập…";
+            try {
+                await perform(submit, error, async () => {
+                    const data = formData(form);
+                    if (registering) {await api.request("auth/register/", "POST", data); notify("Đã tạo tài khoản. Bạn có thể đăng nhập."); registering = false; updateMode(); return;}
+                    const result = await api.request("auth/login/", "POST", data); state.token = result.token; state.user = result.user; sessionStorage.setItem("emergency-token", state.token);
+                    state.categories = await api.all("incident-categories/?page_size=100"); go(E.homes[state.user.role]); connectRealtime();
+                });
+            } finally {
+                busy = false; form.setAttribute("aria-busy", "false"); toggle.disabled = false; usernameInput.readOnly = false; passwordInput.readOnly = false;
+                spinner.hidden = true; submitLabel.textContent = registering ? "Tạo tài khoản" : "Đăng nhập";
+            }
+        };
+        const mobileBrand = node("div", {class: "auth-mobile-brand"}, brand("KẾT NỐI · ĐIỀU PHỐI"));
+        app.replaceChildren(node("div", {class: "login-layout auth-layout"},
+            node("section", {class: "login-story"}, brand("KẾT NỐI · ĐIỀU PHỐI"), node("div", {class: "auth-story-content"}, node("p", {class: "eyebrow"}, "Hệ thống quản lý sự cố"), node("h1", {}, "Đúng thông tin.", node("br"), "Kịp thời ứng phó."), node("p", {class: "auth-story-description"}, "Kết nối người dân, điều phối viên và đội ứng cứu trong một quy trình thống nhất."))),
+            node("main", {class: "login-form", id: "content", "aria-labelledby": "login-title"}, node("div", {class: "login-inner"}, mobileBrand, title, subtitle, form, node("p", {class: "auth-switch"}, switchPrompt, toggle)))));
     }
     function pagination(container, data, path, setPage, reload) {
         container.replaceChildren(); if (!data.count) return;

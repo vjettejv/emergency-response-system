@@ -32,13 +32,13 @@ test("login errors hide non_field_errors and preserve network and validation sta
     const api = E.apiClient({base: "/api/v1/", token: () => "", unauthorized() {revoked++;}, fetcher: async () => response(status, body)});
     for (const code of [400, 401]) {
         status = code;
-        await assert.rejects(api.request("auth/login/", "POST", {}), error => error.message === "Tên đăng nhập hoặc mật khẩu chưa đúng.");
+        await assert.rejects(api.request("auth/login/", "POST", {}), error => error.message === "Tên đăng nhập hoặc mật khẩu không đúng.");
     }
     assert.equal(revoked, 0);
     status = 400; body = {username: ["This field is required."]};
     await assert.rejects(api.request("auth/login/", "POST", {}), error => error.message === "Tên đăng nhập: Vui lòng kiểm tra lại.");
     status = 503;
-    await assert.rejects(api.request("auth/login/", "POST", {}), error => error.message.includes("Tạm thời không tải được dữ liệu"));
+    await assert.rejects(api.request("auth/login/", "POST", {}), error => error.message === "Không thể kết nối tới hệ thống. Vui lòng thử lại.");
     status = 400; body = {non_field_errors: ["Không thể thực hiện thao tác này."]};
     await assert.rejects(api.request("incidents/", "POST", {}), error => error.message === "Không thể thực hiện thao tác này.");
 });
@@ -51,9 +51,69 @@ test("actual login form renders a friendly credentials error without backend fie
     findUI(h.app, element => element.name === "username").value = "synthetic-invalid-login";
     findUI(h.app, element => element.name === "password").value = "SyntheticInvalidLogin42!";
     findUI(h.app, element => element.tag === "form").onsubmit({preventDefault() {}}); await flushUI();
-    assert.match(h.app.text, /Tên đăng nhập hoặc mật khẩu chưa đúng\./);
+    assert.match(h.app.text, /Tên đăng nhập hoặc mật khẩu không đúng\./);
     assert.ok(!h.app.text.includes("non_field_errors"));
     assert.equal(findUI(h.app, element => element.tag === "button" && element.attrs.type === "submit").disabled, false);
+});
+
+test("login password visibility is accessible and preserves the typed password", async () => {
+    const h = screenHarness("citizen", "/login"); h.context.sessionStorage.getItem = () => "";
+    await h.run();
+    const password = findUI(h.app, element => element.name === "password");
+    const toggle = findUI(h.app, element => element.className === "auth-visibility");
+    password.value = "SyntheticVisibility42!";
+    assert.equal(password.type, "password"); assert.equal(toggle.attrs["aria-label"], "Hiện mật khẩu");
+    toggle.click(); assert.equal(password.type, "text"); assert.equal(toggle.attrs["aria-pressed"], "true");
+    assert.equal(toggle.attrs["aria-label"], "Ẩn mật khẩu");
+    toggle.click(); assert.equal(password.type, "password"); assert.equal(password.value, "SyntheticVisibility42!");
+    assert.ok(!h.calls.some(url => url.includes("auth/login/")));
+    assert.ok(!/KHÔNG GIAN LÀM VIỆC|Quên mật khẩu/.test(h.app.text));
+});
+
+test("login prevents duplicate requests and restores controls after failure", async () => {
+    const h = screenHarness("citizen", "/login"), fetcher = h.context.fetch; let release, requests = 0;
+    h.context.sessionStorage.getItem = () => "";
+    h.context.fetch = (url, options) => url.endsWith("auth/login/") ? (requests++, new Promise(resolve => {release = resolve;})) : fetcher(url, options);
+    await h.run();
+    const form = findUI(h.app, element => element.tag === "form");
+    const submit = findUI(h.app, element => element.className === "auth-submit");
+    const spinner = findUI(h.app, element => element.className === "auth-spinner");
+    const registration = findUI(h.app, element => element.className === "auth-link");
+    const event = {preventDefault() {}};
+    const pending = form.onsubmit(event); await form.onsubmit(event);
+    assert.equal(requests, 1); assert.equal(submit.disabled, true); assert.equal(spinner.hidden, false);
+    assert.equal(form.attrs["aria-busy"], "true"); assert.equal(registration.disabled, true);
+    assert.equal(findUI(h.app, element => element.name === "password").readOnly, true);
+    release(response(400, {non_field_errors: ["Internal credentials failure"]})); await pending;
+    assert.equal(submit.disabled, false); assert.equal(spinner.hidden, true);
+    assert.equal(registration.disabled, false); assert.equal(form.attrs["aria-busy"], "false");
+    assert.equal(findUI(h.app, element => element.id === "login-error").textContent, "Tên đăng nhập hoặc mật khẩu không đúng.");
+});
+
+test("login network and server failures use the same nontechnical message", async () => {
+    for (const failure of [new TypeError("Failed to fetch"), response(503, {detail: "Redis host internal unavailable"})]) {
+        const api = E.apiClient({base: "/api/v1/", token: () => "", fetcher: async () => {if (failure instanceof Error) throw failure; return failure;}});
+        await assert.rejects(api.request("auth/login/", "POST", {}), error => error.message === "Không thể kết nối tới hệ thống. Vui lòng thử lại.");
+    }
+});
+
+test("registration preserves the Citizen API payload and returns to login", async () => {
+    const h = screenHarness("citizen", "/login"), fetcher = h.context.fetch; let payload;
+    h.context.sessionStorage.getItem = () => "";
+    h.context.fetch = (url, options) => {
+        if (url.endsWith("auth/register/")) {payload = JSON.parse(options.body); return Promise.resolve(response(201, {}));}
+        return fetcher(url, options);
+    };
+    await h.run();
+    await findUI(h.app, element => element.className === "auth-link").click();
+    const password = findUI(h.app, element => element.name === "password");
+    assert.equal(password.attrs.autocomplete, "new-password");
+    findUI(h.app, element => element.name === "username").value = "synthetic-citizen"; password.value = "SyntheticRegister42!";
+    await findUI(h.app, element => element.tag === "form").onsubmit({preventDefault() {}});
+    assert.deepEqual(payload, {username: "synthetic-citizen", password: "SyntheticRegister42!"});
+    assert.equal(password.attrs.autocomplete, "current-password");
+    assert.equal(findUI(h.app, element => element.id === "login-title").textContent, "Chào mừng trở lại");
+    assert.equal(h.context.location.hash, "#/login");
 });
 
 test("API rejects late snapshots and blocks writes against stale data", async () => {

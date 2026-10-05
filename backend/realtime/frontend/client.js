@@ -37,8 +37,9 @@
     }
     class APIError extends Error {
         constructor(status, body, retryAfter, path = "") {
-            const invalidLogin = path === "auth/login/" && (status === 401 || (status === 400 && body?.non_field_errors));
-            const message = invalidLogin ? "Tên đăng nhập hoặc mật khẩu chưa đúng." : status === 0 ? "Mất kết nối. Kiểm tra mạng và thử lại." : status === 401 ? "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại." : status === 403 ? "Bạn không có quyền thực hiện thao tác này." : status === 404 ? "Thông tin này không còn khả dụng." : status === 409 ? "Thông tin đã thay đổi. Cập nhật và thử lại." : status === 429 ? "Bạn thao tác quá nhanh. Vui lòng chờ một chút." : status >= 500 ? "Tạm thời không tải được dữ liệu. Vui lòng thử lại." : describe(body);
+            const invalidLogin = path === "auth/login/" && (status === 401 || (status === 400 && (body?.non_field_errors || body?.detail)));
+            const authUnavailable = ["auth/login/", "auth/register/"].includes(path) && (status === 0 || status >= 500);
+            const message = invalidLogin ? "Tên đăng nhập hoặc mật khẩu không đúng." : authUnavailable ? "Không thể kết nối tới hệ thống. Vui lòng thử lại." : status === 0 ? "Mất kết nối. Kiểm tra mạng và thử lại." : status === 401 ? "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại." : status === 403 ? "Bạn không có quyền thực hiện thao tác này." : status === 404 ? "Thông tin này không còn khả dụng." : status === 409 ? "Thông tin đã thay đổi. Cập nhật và thử lại." : status === 429 ? "Bạn thao tác quá nhanh. Vui lòng chờ một chút." : status >= 500 ? "Tạm thời không tải được dữ liệu. Vui lòng thử lại." : describe(body);
             super(message); this.status = status; this.body = body; this.retryAfter = retryAfter;
         }
     }
@@ -50,7 +51,7 @@
             if (url.origin !== origin.origin || !url.pathname.startsWith(origin.pathname)) throw new APIError(400, "Đường dẫn API không hợp lệ.");
             let response;
             try { response = await fetcher(url.href, {method, signal: options.signal, headers: {"Content-Type": "application/json", ...(token() ? {Authorization: `Token ${token()}`} : {})}, ...(body === undefined ? {} : {body: JSON.stringify(body)})}); }
-            catch (error) { if (error.name === "AbortError") throw error; throw new APIError(0, "Mất kết nối máy chủ. Kiểm tra mạng và thử lại."); }
+            catch (error) { if (error.name === "AbortError") throw error; throw new APIError(0, "Mất kết nối máy chủ. Kiểm tra mạng và thử lại.", undefined, path); }
             const data = response.status === 204 ? null : await response.json().catch(() => ({detail: "Phản hồi máy chủ không hợp lệ."}));
             if (!response.ok) { if (response.status === 401 && path !== "auth/login/") unauthorized(); throw new APIError(response.status, data, Number(response.headers.get("Retry-After")) || 15, path); }
             if (method === "GET" && version !== snapshot()) throw Object.assign(new Error("Obsolete snapshot"), {name: "ObsoleteSnapshot"});
