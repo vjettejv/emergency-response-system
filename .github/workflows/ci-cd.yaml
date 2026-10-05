@@ -34,8 +34,17 @@ jobs:
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    environment: production
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DEPLOY_SHA: ${{ github.sha }}
+      REPOSITORY: ${{ github.repository }}
     concurrency:
       group: production-deployment
       cancel-in-progress: false
@@ -43,13 +52,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Deploy tested commit over pinned SSH
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          EXPECTED_SHA: ${{ github.sha }}
-        run: bash infra/github_deploy.sh
+      - name: Validate deployment variables
+        run: python3 infra/ssm_deploy.py --validate-only
+      - name: Assume deployment role through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@cabfdba3510de1431bac9dba27511d97497fc100 # v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: ers-${{ github.run_id }}-${{ github.run_attempt }}
+          allowed-account-ids: '920226265516'
+          mask-aws-account-id: true
+      - name: Deploy exact tested commit through SSM and verify HTTPS
+        run: python3 infra/ssm_deploy.py
