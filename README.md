@@ -189,7 +189,7 @@ Media đi theo luồng **metadata → presigned URL → upload trực tiếp S3 
 
 ## Production và CI/CD
 
-Production: [https://vjettejv.id.vn](https://vjettejv.id.vn), sử dụng EC2, Docker Compose, Nginx, Django/Daphne, Redis, Celery, RDS PostgreSQL/PostGIS và S3. Database dùng TLS `verify-full`; chỉ Nginx publish cổng ra ngoài. Phase 8.5–9 đã được triển khai ngày 07/10/2026 qua OIDC/SSM; trạng thái release vẫn chờ kiểm tra điện thoại thật.
+Production: [https://vjettejv.id.vn](https://vjettejv.id.vn), sử dụng EC2, Docker Compose, Nginx, Django/Daphne, Redis, Celery, RDS PostgreSQL/PostGIS và S3. Database dùng TLS `verify-full`; chỉ Nginx publish cổng ra ngoài. Phase 8.5–9 đã được triển khai ngày 07/10/2026 qua OIDC/SSM. Kiểm tra production tự động đã pass; người dùng xác nhận kiểm tra điện thoại thật đều pass ngày 07/10/2026.
 
 Workflow [.github/workflows/ci-cd.yaml](.github/workflows/ci-cd.yaml) chạy khi push hoặc pull request vào `main`:
 
@@ -220,13 +220,17 @@ PostGIS và Redis phải đang chạy cho backend integration tests; test runner
 
 Backend **242/242**, frontend **62/62**, hạ tầng Linux **33/33** đã pass. Docker build, Django check, migration drift và Compose local/production overrides đều pass; local không còn migration chờ áp dụng. Các test gồm luồng REST + Redis WebSocket + notification + xử lý ảnh, race condition và phục hồi worker. S3 trong test được stub; chưa chạy production smoke cho bản này.
 
-### Final release candidate — 07/10/2026
+### Final release verification — 07/10/2026
 
 Chạy lại trên database test mới: **243/243 backend**, **62/62 frontend**, **33/33 infra Linux**, **216/216 regression** pass. Test bổ sung xác nhận JSON vượt giới hạn dung lượng bị chặn trước khi ghi báo cáo. Docker build, Django check, migration drift, JavaScript syntax, Compose và Nginx HTTP/HTTPS đều pass. DRF được cập nhật lên **3.17.2**, Daphne lên **4.2.2** để vá các advisory; `pip-audit` trên requirements và **51 dependency của Docker image** không còn finding. Frontend vanilla không có npm dependencies để audit.
 
 Preflight production xác nhận hai migration chỉ thêm bảng Notification, các trường và index MediaAsset; deployment đã áp dụng thành công, không xóa hay đảo migration. Batch [3dae532](https://github.com/vjettejv/emergency-response-system/commit/3dae5328ae59e191e312d714f93b9a2ff655efdb) vượt qua [CI/CD](https://github.com/vjettejv/emergency-response-system/actions/runs/37586611629), S3 upload/confirm/private download/URL hết hạn, Celery optimization, PostGIS, WSS/notification/reconnect và golden path production với dữ liệu RELEASE TEST. Kiểm tra responsive phát hiện CSS cũ ẩn chuông thông báo Citizen/Dispatcher trên mobile; selector đã được sửa để giữ notification cho mọi role.
 
-GPS/camera, keyboard và bản đồ nền trên điện thoại thật vẫn **MANUAL PENDING**; chưa tạo release tag. Tile nền chưa tải được trên máy kiểm tra, trong khi cùng URL trả HTTP 200 từ EC2; không coi viewport mô phỏng là bằng chứng thiết bị thật. Không reset volume hoặc tự rollback schema khi deployment lỗi sau migration.
+Code ứng dụng được xác minh trên production tại commit [f42f4ba](https://github.com/vjettejv/emergency-response-system/commit/f42f4baba74bb168fe87712aa38e5cc999c8f058), với [CI/CD thành công](https://github.com/vjettejv/emergency-response-system/actions/runs/37588858668). S3/Celery, WSS, PostGIS và golden path đã pass lại trên commit này. Media thử nghiệm đã được xóa cả bản gốc và tối ưu; bốn tài khoản RELEASE TEST bị vô hiệu hóa, đội offline, audit history được giữ.
+
+Người dùng xác nhận **PASS trên điện thoại thật** cho GPS, camera/chụp–preview–gửi ảnh, bản đồ, nhiệm vụ Rescue, reconnect và giao diện khi mở bàn phím. Đây là xác nhận manual của người dùng; tên thiết bị và trình duyệt chưa được cung cấp. Tile nền từng không tải được trên máy kiểm tra, trong khi cùng URL trả HTTP 200 từ EC2; viewport mô phỏng không được dùng thay bằng chứng thiết bị thật.
+
+Mốc release đầu tiên: **v1.0.0**. Tag trỏ tới commit production chứa cập nhật tài liệu cuối; chỉ push tag sau khi CI/CD commit đó thành công và xác minh SHA/HTTPS production. Code ứng dụng giữ nguyên từ `f42f4ba`. Không reset volume hoặc tự rollback schema khi deployment lỗi sau migration.
 
 Benchmark tùy chọn dùng database test riêng, không gọi S3 hay production:
 
@@ -247,4 +251,4 @@ Mẫu local gồm 2.000 report, 500 incident, 300 team; 370 HTTP request qua Dap
 - Rate guard hiện có: auth 20/phút/IP, report write 120/phút/user, presign + confirm chung 300/phút/user, notification 600/phút/user; GPS có giới hạn khoảng cách thời gian theo đội. Cache rate guard lỗi trả 503; DRF throttle không đảm bảo quota nguyên tử dưới tải đồng thời.
 - Nginx giới hạn 40 kết nối WebSocket đồng thời/IP; các người dùng chung NAT chia sẻ giới hạn này. Redis/DB gián đoạn đóng socket với mã retryable; client reconnect rồi đồng bộ REST.
 
-Repository phục vụ đồ án và demo nghiệp vụ. Chưa có load test production cuối cùng, email/SMS/mobile push, định tuyến/ETA hay cam kết khả dụng của một dịch vụ khẩn cấp thực tế. Camera/GPS và bản đồ nền phụ thuộc thiết bị, quyền trình duyệt và mạng; S3 private/CORS/IAM cần smoke test trên đích triển khai trước release.
+Repository phục vụ đồ án và demo nghiệp vụ. Chưa có load test production cuối cùng, email/SMS/mobile push, định tuyến/ETA hay cam kết khả dụng của một dịch vụ khẩn cấp thực tế. Camera/GPS và bản đồ nền phụ thuộc thiết bị, quyền trình duyệt và mạng; S3 private/CORS/IAM đã vượt qua smoke test trên production cho bản release này và cần kiểm tra lại khi đổi cấu hình.
