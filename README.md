@@ -189,7 +189,7 @@ Media đi theo luồng **metadata → presigned URL → upload trực tiếp S3 
 
 ## Production và CI/CD
 
-Địa chỉ deployment trước đây: [https://vjettejv.id.vn](https://vjettejv.id.vn), sử dụng EC2, Docker Compose, Nginx, Django/Daphne, Redis, Celery, RDS PostgreSQL/PostGIS và S3. Database production dùng TLS `verify-full`; chỉ Nginx publish cổng ra ngoài. Bản Phase 8.5/8.6/9 đang được xác nhận local; kết quả dưới đây không xác nhận các thay đổi này đã chạy trên AWS.
+Production: [https://vjettejv.id.vn](https://vjettejv.id.vn), sử dụng EC2, Docker Compose, Nginx, Django/Daphne, Redis, Celery, RDS PostgreSQL/PostGIS và S3. Database dùng TLS `verify-full`; chỉ Nginx publish cổng ra ngoài. Phase 8.5–9 đã được triển khai ngày 07/10/2026 qua OIDC/SSM; trạng thái release vẫn chờ kiểm tra điện thoại thật.
 
 Workflow [.github/workflows/ci-cd.yaml](.github/workflows/ci-cd.yaml) chạy khi push hoặc pull request vào `main`:
 
@@ -224,7 +224,9 @@ Backend **242/242**, frontend **62/62**, hạ tầng Linux **33/33** đã pass. 
 
 Chạy lại trên database test mới: **243/243 backend**, **62/62 frontend**, **33/33 infra Linux**, **216/216 regression** pass. Test bổ sung xác nhận JSON vượt giới hạn dung lượng bị chặn trước khi ghi báo cáo. Docker build, Django check, migration drift, JavaScript syntax, Compose và Nginx HTTP/HTTPS đều pass. DRF được cập nhật lên **3.17.2**, Daphne lên **4.2.2** để vá các advisory; `pip-audit` trên requirements và **51 dependency của Docker image** không còn finding. Frontend vanilla không có npm dependencies để audit.
 
-Preflight production xác nhận hai migration chờ triển khai chỉ thêm bảng Notification, các trường và index MediaAsset; không xóa hay đảo migration. CI/CD và production smoke của release candidate cần hoàn thành trước khi xác nhận release. Kiểm tra GPS/camera trên điện thoại thật vẫn bắt buộc; chưa tạo release tag.
+Preflight production xác nhận hai migration chỉ thêm bảng Notification, các trường và index MediaAsset; deployment đã áp dụng thành công, không xóa hay đảo migration. Batch [3dae532](https://github.com/vjettejv/emergency-response-system/commit/3dae5328ae59e191e312d714f93b9a2ff655efdb) vượt qua [CI/CD](https://github.com/vjettejv/emergency-response-system/actions/runs/37586611629), S3 upload/confirm/private download/URL hết hạn, Celery optimization, PostGIS, WSS/notification/reconnect và golden path production với dữ liệu RELEASE TEST. Kiểm tra responsive phát hiện CSS cũ ẩn chuông thông báo Citizen/Dispatcher trên mobile; selector đã được sửa để giữ notification cho mọi role.
+
+GPS/camera, keyboard và bản đồ nền trên điện thoại thật vẫn **MANUAL PENDING**; chưa tạo release tag. Tile nền chưa tải được trên máy kiểm tra, trong khi cùng URL trả HTTP 200 từ EC2; không coi viewport mô phỏng là bằng chứng thiết bị thật. Không reset volume hoặc tự rollback schema khi deployment lỗi sau migration.
 
 Benchmark tùy chọn dùng database test riêng, không gọi S3 hay production:
 
