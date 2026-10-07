@@ -108,7 +108,10 @@ class FrontendShellTests(TestCase):
         user.set_password("Synthetic-modified-pass-48!")
         user.save()
         call_command("seed_demo", stdout=StringIO())
-        self.assertEqual(User.objects.count(), 4)
+        self.assertEqual(User.objects.count(), 6)
+        self.assertEqual(ResponseTeam.objects.count(), 3)
+        for code in ("demo-medical", "demo-backup"):
+            self.assertTrue(ResponseTeam.objects.get(code=code).categories.exists())
         team.refresh_from_db()
         user.refresh_from_db()
         self.assertEqual(team.status, "offline")

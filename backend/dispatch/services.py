@@ -9,6 +9,7 @@ from incidents.models import Incident, IncidentStatus, IncidentStatusHistory
 from incidents.services import Conflict, locked_object, require_role
 from teams.models import ResponseTeam
 from realtime.events import assignment_changed, incident_changed
+from notifications import services as notifications
 
 from .models import ACTIVE_ASSIGNMENT_STATUSES, TERMINAL_ASSIGNMENT_STATUSES, Assignment, AssignmentHistory
 
@@ -53,10 +54,11 @@ def _incident_status(incident, target, actor, note):
     previous = incident.status
     incident.status = target
     incident.save(update_fields=["status", "updated_at"])
-    IncidentStatusHistory.objects.create(
+    history = IncidentStatusHistory.objects.create(
         incident=incident, from_status=previous, to_status=target, changed_by=actor, note=note,
     )
     incident_changed(incident)
+    notifications.incident_updated(incident, history.pk)
 
 
 def _team_status(team, status):
@@ -66,11 +68,12 @@ def _team_status(team, status):
 
 
 def _record(assignment, actor, operation, previous, note):
-    AssignmentHistory.objects.create(
+    history = AssignmentHistory.objects.create(
         assignment=assignment, actor=actor, operation=operation,
         from_status=previous, to_status=assignment.status, note=note,
     )
     assignment_changed(assignment)
+    notifications.assignment_updated(assignment, history.pk)
 
 
 def _create_assignment(incident, team, actor, note, supersedes=None):
@@ -217,4 +220,5 @@ def submit_signal(*, actor, assignment_id, data):
         "signal_id": signal.pk, "assignment_id": assignment.pk, "incident_id": incident.pk,
         "team_id": assignment.team_id, "kind": signal.kind,
     })
+    notifications.assistance_requested(signal)
     return signal

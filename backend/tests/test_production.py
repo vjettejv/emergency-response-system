@@ -106,8 +106,12 @@ class HealthAndCorsTests(TestCase):
             self.assertEqual(response.status_code, 403)
             self.assertNotIn("Access-Control-Allow-Origin", response)
 
-    def test_root_keeps_existing_frontend_route(self):
-        self.assertRedirects(self.client.get("/"), "/realtime/", fetch_redirect_response=False)
+    def test_root_serves_public_landing_without_redirect(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        content = b"".join(response.streaming_content).decode()
+        self.assertIn('id="hero-title"', content)
+        self.assertNotIn('src="/realtime/app.js"', content)
 
 
 class DeploymentCommandsTests(TestCase):

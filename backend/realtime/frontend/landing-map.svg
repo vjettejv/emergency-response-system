@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 560" fill="none">
+  <rect width="620" height="560" fill="#edf2f2"/>
+  <g fill="#e0e8e6" stroke="#d4dfdc" stroke-width="1.5">
+    <path d="M30 26h128v84H30zM189 26h112v84H189zM330 26h88v84h-88zM449 26h142v84H449zM30 140h76v117H30zM139 140h162v63H139zM139 230h162v84H139zM335 140h83v117h-83zM450 140h142v65H450zM450 230h142v84H450zM30 345h128v92H30zM192 345h109v92H192zM450 345h142v91H450zM30 468h128v67H30zM190 468h112v67H190zM450 468h142v67H450z"/>
+  </g>
+  <path d="M355-30c-6 100 96 147 27 267s-59 210 37 343" stroke="#bcdce0" stroke-width="35"/>
+  <g stroke="#fff" stroke-width="20" stroke-linecap="square">
+    <path d="M-20 125h660M-20 329h660M-20 453h660M175-20v610M316-20v610M435-20v610M122 130v180"/>
+  </g>
+  <g stroke="#d8e3e3" stroke-width="1.5"><path d="M0 125h620M0 329h620M0 453h620M175 0v560M316 0v560M435 0v560"/></g>
+  <path d="M175 179v150h141v124h119" stroke="#147a9c" stroke-width="3" stroke-dasharray="7 7" stroke-linejoin="round"/>
+  <circle cx="175" cy="179" r="34" fill="#bf5d42" fill-opacity=".12"/>
+  <path d="M194 173c0 15-19 32-19 32s-19-17-19-32a19 19 0 0 1 38 0Z" fill="#b94e34" stroke="#fff" stroke-width="4"/>
+  <path d="M175 163v12" stroke="#fff" stroke-width="3" stroke-linecap="round"/><circle cx="175" cy="181" r="1.7" fill="#fff"/>
+  <circle cx="316" cy="329" r="29" fill="#142e47" stroke="#fff" stroke-width="4"/>
+  <g stroke="#fff" stroke-width="2" stroke-linecap="round"><rect x="304" y="318" width="24" height="16" rx="2"/><path d="M309 340h14M316 334v6M309 324h4m3 0h7M309 329h8"/></g>
+  <circle cx="435" cy="453" r="29" fill="#147a9c" stroke="#fff" stroke-width="4"/>
+  <path d="m435 438 11 5v8c0 7-11 13-11 13s-11-6-11-13v-8l11-5Z" stroke="#fff" stroke-width="2"/><path d="M435 444v9m-4-4h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <g font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#142e47">
+    <rect x="211" y="155" width="139" height="38" rx="7" fill="#fff"/><text x="225" y="179">Vị trí sự cố</text>
+    <rect x="355" y="307" width="149" height="38" rx="7" fill="#fff"/><text x="369" y="331">Điều phối viên</text>
+    <rect x="245" y="431" width="146" height="38" rx="7" fill="#fff"/><text x="259" y="455">Đội ứng cứu</text>
+  </g>
+</svg>

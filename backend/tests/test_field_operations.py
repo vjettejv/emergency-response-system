@@ -180,7 +180,7 @@ class FieldOperationsTests(APITestCase):
         with patch("realtime.events.deliver") as delivery, self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(f"/api/v1/assignments/{self.assignment.pk}/signals/", payload, format="json")
         self.assertEqual(response.status_code, 201, response.data)
-        event = delivery.call_args.args[1]
+        event = next(call.args[1] for call in delivery.call_args_list if call.args[1]["type"] == "assignment.signal_created")
         self.assertEqual(event["type"], "assignment.signal_created")
         self.assertEqual(set(event["data"]), {"signal_id", "assignment_id", "incident_id", "team_id", "kind"})
         self.assertNotIn(self.report.reporter_phone, str(event))
@@ -295,7 +295,7 @@ class FieldOperationsTests(APITestCase):
             sent = self.client.post(f"/api/v1/incident-reports/{pk}/submit/", {}, format="json")
         self.assertFalse(sent.data["is_draft"])
         self.assertIsNotNone(sent.data["reported_at"])
-        self.assertEqual(delivery.call_args.args[1]["type"], "report.changed")
+        self.assertEqual(sum(call.args[1]["type"] == "report.changed" for call in delivery.call_args_list), 1)
         again = self.client.post(f"/api/v1/incident-reports/{pk}/submit/", {}, format="json")
         self.assertEqual(again.data["reported_at"], sent.data["reported_at"])
         recovered = self.client.post("/api/v1/incident-reports/drafts/", {**body, "description": "Attempt rewrite after submission"}, format="json")

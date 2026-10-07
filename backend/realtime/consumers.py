@@ -1,14 +1,19 @@
 import asyncio
 import json
+import logging
 import time
 from contextlib import suppress
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.conf import settings
+from django.db import DatabaseError
 from rest_framework.authtoken.models import Token
+from redis.exceptions import RedisError
 
 from accounts.models import Role
+
+logger = logging.getLogger(__name__)
 
 
 @database_sync_to_async
@@ -26,6 +31,9 @@ class EventConsumer(AsyncJsonWebsocketConsumer):
     async def __call__(self, scope, receive, send):
         try:
             await super().__call__(scope, receive, send)
+        except RedisError:
+            logger.warning("WebSocket channel unavailable")
+            await self.close(code=1013)
         finally:
             # Also clean up when the channel layer fails before disconnect arrives.
             await self.cleanup()
@@ -52,6 +60,7 @@ class EventConsumer(AsyncJsonWebsocketConsumer):
             try:
                 await self.channel_layer.group_add(self.group, self.channel_name)
             except Exception:
+                logger.warning("WebSocket channel unavailable")
                 await self.close(code=1013)
                 return
             await self.send_json({"type": "heartbeat"})
@@ -59,10 +68,21 @@ class EventConsumer(AsyncJsonWebsocketConsumer):
     async def authorized(self):
         if self.closed:
             return False
-        if not self.bound_identity or await identity(self.token_key) != self.bound_identity:
+        current = await self.current_identity(self.token_key) if self.bound_identity else None
+        if self.closed:
+            return False
+        if not self.bound_identity or current != self.bound_identity:
             await self.close(code=4403)
             return False
         return True
+
+    async def current_identity(self, token):
+        try:
+            return await identity(token)
+        except DatabaseError:
+            logger.warning("WebSocket authentication database unavailable")
+            await self.close(code=1013)
+            return None
 
     async def receive(self, text_data=None, bytes_data=None, **kwargs):
         if self.closed:
@@ -93,13 +113,15 @@ class EventConsumer(AsyncJsonWebsocketConsumer):
             if not isinstance(token, str) or len(token) != 40:
                 await self.close(code=4401)
                 return
-            user = await identity(token)
+            user = await self.current_identity(token)
             if self.closed:
                 return
             if not user:
                 await self.close(code=4401)
                 return
-            if self.audience == "dispatcher" and user[1] in (Role.DISPATCHER, Role.ADMIN):
+            if self.audience == "notification" and user[1] in Role.values:
+                self.group = f"user_{user[0]}"
+            elif self.audience == "dispatcher" and user[1] in (Role.DISPATCHER, Role.ADMIN):
                 self.group = "dispatchers"
             elif self.audience == "rescue" and user[1] == Role.RESCUE_TEAM and user[2]:
                 self.group = f"team.{user[2]}"
@@ -110,6 +132,7 @@ class EventConsumer(AsyncJsonWebsocketConsumer):
             try:
                 await self.channel_layer.group_add(self.group, self.channel_name)
             except Exception:
+                logger.warning("WebSocket channel unavailable")
                 await self.close(code=1013)
                 return
             await self.send_json({"type": "ready", "resync_required": True})
@@ -140,8 +163,10 @@ class EventConsumer(AsyncJsonWebsocketConsumer):
                 await watchdog
             self.watchdog = None
         if getattr(self, "group", None):
-            with suppress(Exception):
+            try:
                 await self.channel_layer.group_discard(self.group, self.channel_name)
+            except Exception:
+                logger.warning("WebSocket group cleanup unavailable")
             self.group = None
 
 
@@ -151,3 +176,7 @@ class DispatcherConsumer(EventConsumer):
 
 class RescueConsumer(EventConsumer):
     audience = "rescue"
+
+
+class NotificationConsumer(EventConsumer):
+    audience = "notification"

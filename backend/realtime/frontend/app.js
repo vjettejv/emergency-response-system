@@ -5,6 +5,7 @@
     const state = {token: sessionStorage.getItem("emergency-token") || "", user: null, categories: [], map: null, socket: null, gps: null, generation: 0, refresh: null, refreshJob: null, connection: "Đang tải…", connectionState: "idle", gpsText: "Chưa chia sẻ vị trí", gpsState: "idle", currentPosition: null, teamName: "", teamStatus: null, follow: true, sound: false, liveMessages: []};
     let config, api;
     Object.assign(state, {syncEpoch: 0, displayState: "loading", lastUpdated: null, snapshotReady: false, refreshError: false});
+    Object.assign(state, {inbox: [], unread: 0, inboxMode: "pending", inboxOpen: false, inboxSocket: null, inboxEpoch: 0});
     function setDisplayState(mode, message = "") {
         state.displayState = mode;
         const shell = document.getElementById("ui-shell"); if (shell) {shell.dataset.viewState = mode; shell.dataset.hasSnapshot = String(!!state.lastUpdated);}
@@ -81,7 +82,10 @@
         sound.connect(gain); gain.connect(state.audio.destination); sound.start(at); sound.stop(at + .2); sound.onended = () => {sound.disconnect(); gain.disconnect();};
     }
     function notify(message, error = false) { const toast = node("div", {class: `toast${error ? " error" : ""}`}, message); document.getElementById("notifications").append(toast); setTimeout(() => toast.remove(), error ? 12000 : 6000); }
-    function go(route) { if (location.hash.slice(1) === route) render(); else location.hash = route; }
+    function go(route) {
+        if (location.pathname === "/login" && route !== "/login") {location.replace(`/realtime/#${route}`); return;}
+        if (location.hash.slice(1) === route) render(); else location.hash = route;
+    }
     function confirm(message, information = false) {
         const dialog = document.getElementById("confirm-dialog"); document.getElementById("confirm-text").textContent = message;
         document.getElementById("confirm-title").textContent = information ? "Hỗ trợ & liên lạc" : "Xác nhận thao tác";
@@ -117,6 +121,7 @@
         state.map = window.EmergencyMap.createMap(element, window.L, {tileUrl: config.tileUrl, showCoordinates: false, onStatus: text => {mapStatus.textContent = text;}}); return state.map;
     }
     function clearSession(message) {
+        state.inboxSocket?.stop(); state.inboxSocket = null; state.inboxEpoch++; state.inbox = []; state.unread = 0; state.inboxOpen = false; state.inboxMode = "pending"; state.inboxLoaded = false;
         if (state.socket) state.socket.stop(); if (state.gps) state.gps.stop();
         state.socket = null; state.gps = null; state.token = ""; state.user = null; state.categories = []; sessionStorage.removeItem("emergency-token");
         state.currentPosition = null; state.teamName = ""; state.teamStatus = null; state.liveMessages = [];
@@ -170,12 +175,12 @@
         deferredRefreshTimer = setTimeout(() => {if (state.refreshPending) refresh();}, 150);
     });
     function connectRealtime() {
-        if (state.user.role === "citizen") { updateConnection("Cập nhật mỗi 30 giây", "idle"); return; }
-        if (state.user.role === "rescue_team" && !state.user.response_team) { updateConnection("Chưa được gán đội", "offline"); notify("Tài khoản chưa thuộc đội ứng cứu. Liên hệ quản trị viên để gán đội trước khi nhận nhiệm vụ hoặc chia sẻ GPS.", true); return; }
+        if (state.user.role === "citizen") {connectNotifications(); updateConnection("Cập nhật mỗi 30 giây", "idle"); return; }
+        if (state.user.role === "rescue_team" && !state.user.response_team) {connectNotifications(); updateConnection("Chưa được gán đội", "offline"); notify("Tài khoản chưa thuộc đội ứng cứu. Liên hệ quản trị viên để gán đội trước khi nhận nhiệm vụ hoặc chia sẻ GPS.", true); return; }
         const url = new URL(state.user.role === "rescue_team" ? config.rescueSocket : config.dispatcherSocket, location.origin); url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
         state.socket = E.realtime({url: url.href, token: () => state.token, Socket: WebSocket, timers: window, now: Date.now, state: updateConnection, ready: () => refresh(true), revoked: () => clearSession("Phiên hoặc quyền đã thay đổi. Vui lòng đăng nhập lại."), event: event => {
             if (event.type === "team.location_updated" && state.displayState === "success" && state.map && state.user.role !== "rescue_team" && (!state.visibleTeamIds || state.visibleTeamIds.has(event.data.team_id))) state.map.update("team", event.data, event.data.name || "Đội ứng cứu");
-            else if (["incident.status_changed", "assignment.status_changed", "report.changed", "reports.linked", "assignment.signal_created", "media.confirmed"].includes(event.type)) {
+            else if (["incident.status_changed", "assignment.status_changed", "report.changed", "reports.linked", "assignment.signal_created", "media.confirmed", "media.optimized"].includes(event.type)) {
                 const ended = (event.type === "assignment.status_changed" && ["completed", "cancelled", "rejected"].includes(event.data.status)) || (event.type === "incident.status_changed" && ["resolved", "cancelled"].includes(event.data.status));
                 if (ended) {
                     state.contactEpoch++; state.contactNodes?.forEach(card => card.remove()); state.contactNodes?.clear();
@@ -183,12 +188,91 @@
                 }
                 refresh(ended);
             }
-            if (event.type === "assignment.signal_created" && state.user.role !== "rescue_team") {
-                const notice = node("div", {class: "toast", role: "status"}, `Đội ứng cứu gửi ${event.data.kind === "support" ? "yêu cầu thêm lực lượng" : "báo vấn đề"}.`, button("Xem sự cố", () => go(`/dispatcher/incidents/${event.data.incident_id}`)));
-                document.getElementById("notifications").append(notice); setTimeout(() => notice.remove(), 15000);
-            }
             if (event.type === "assignment.status_changed" && state.user.role === "rescue_team") {state.teamStatus = null; state.liveMessages.unshift({at: new Date().toISOString(), text: `Nhiệm vụ: ${labels[event.data.status] || "Đã cập nhật"}`}); state.liveMessages = state.liveMessages.slice(0, 20); if (event.data.status === "assigned") missionTone();}
         }});
+        connectNotifications();
+    }
+    async function loadInbox() {
+        const epoch = ++state.inboxEpoch;
+        try {
+            const [page, count] = await Promise.all([api.request("notifications/?page_size=20"), api.request("notifications/unread-count/")]);
+            if (epoch !== state.inboxEpoch || !state.user) return false;
+            state.inbox = page.results || []; state.inboxNext = page.next; state.unread = count.count || 0;
+            state.inboxLoaded = true; paintInbox(); return true;
+        } catch (failure) {if (epoch === state.inboxEpoch && failure.name !== "ObsoleteSnapshot") {state.inboxMode = failure.status === 0 ? "offline" : "error"; paintInbox();} return false;}
+    }
+    function notificationRoute(item) {
+        const entity = item.related_entity; if (!entity || !Number.isInteger(entity.id)) return null;
+        const role = state.user.role;
+        if (entity.kind === "report" && role === "citizen") return `/citizen/reports/${entity.id}`;
+        if (entity.kind === "assignment" && role === "rescue_team") return `/rescue/assignments/${entity.id}`;
+        if (["dispatcher", "admin"].includes(role) && ["report", "incident"].includes(entity.kind)) return `/dispatcher/${entity.kind === "report" ? "reports" : "incidents"}/${entity.id}`;
+        return null;
+    }
+    function paintInbox() {
+        if (!state.inboxBadge) return;
+        const online = state.inboxMode === "online";
+        state.inboxBadge.textContent = online ? String(Math.min(state.unread, 99)) + (state.unread > 99 ? "+" : "") : "";
+        state.inboxBadge.hidden = !online || !state.unread;
+        state.inboxBell.setAttribute("aria-label", online && state.unread ? `Thông báo, ${state.unread} chưa đọc` : "Thông báo");
+        state.inboxBell.setAttribute("aria-expanded", String(state.inboxOpen)); state.inboxPanel.hidden = !state.inboxOpen;
+        state.inboxStatus.textContent = online ? "" : state.inboxMode === "error" ? `Không tải được thông báo.${state.inbox.length ? " Dữ liệu gần nhất." : ""}` : state.inboxMode === "offline" ? "Mất kết nối · Dữ liệu gần nhất" : "Đang cập nhật thông báo…";
+        state.inboxStatus.hidden = online;
+        state.inboxRetry.hidden = !["offline", "error"].includes(state.inboxMode);
+        state.inboxList.className = `inbox-list${online ? "" : " inbox-stale"}`;
+        state.inboxAll.disabled = !online || !state.unread;
+        state.inboxMore.hidden = !state.inboxNext; state.inboxMore.disabled = !online;
+        state.inboxList.replaceChildren(...state.inbox.map(item => {
+            const control = button("", async () => {
+                if (!online) return;
+                const route = notificationRoute(item);
+                try {if (!item.read_at) await api.request(`notifications/${item.id}/read/`, "POST", {}); await loadInbox();
+                    if (route) {state.inboxOpen = false; go(route); paintInbox();}
+                } catch (failure) {notify(E.publicError(failure), true);}
+            });
+            control.className = `inbox-item${item.read_at ? "" : " unread"}`; control.disabled = !online;
+            control.append(node("strong", {}, item.title), node("span", {}, item.message), node("small", {}, date(item.created_at)));
+            return control;
+        }), ...(!state.inbox.length && online ? [node("p", {class: "empty"}, "Chưa có thông báo.")] : []));
+    }
+    function notificationCenter() {
+        state.inboxBadge = node("span", {class: "inbox-badge", hidden: true, "aria-hidden": "true"});
+        state.inboxBell = button("", () => {state.inboxOpen = !state.inboxOpen; paintInbox(); if (state.inboxOpen && state.inboxMode === "online") loadInbox();});
+        state.inboxBell.className = "secondary inbox-bell"; state.inboxBell.append(icon("bell"), state.inboxBadge);
+        state.inboxBell.setAttribute("aria-controls", "inbox-panel");
+        state.inboxList = node("div", {class: "inbox-list"}); state.inboxStatus = node("p", {class: "inbox-status", role: "status"});
+        state.inboxRetry = button("Thử lại", () => state.inboxSocket?.retry());
+        state.inboxAll = button("Đánh dấu tất cả đã đọc", async () => {state.inboxAll.disabled = true;
+            try {await api.request("notifications/read-all/", "POST", {}); await loadInbox();} catch (failure) {notify(E.publicError(failure), true); paintInbox();}
+        });
+        state.inboxMore = button("Xem thêm", async () => {
+            const epoch = state.inboxEpoch; state.inboxMore.disabled = true;
+            try {const page = await api.request(state.inboxNext); if (epoch !== state.inboxEpoch) return;
+                const existing = new Set(state.inbox.map(item => item.id)); state.inbox.push(...page.results.filter(item => !existing.has(item.id))); state.inboxNext = page.next; paintInbox();
+            } catch (failure) {notify(E.publicError(failure), true); paintInbox();}
+        });
+        state.inboxPanel = node("section", {id: "inbox-panel", class: "inbox-panel", hidden: true, "aria-label": "Thông báo"},
+            node("div", {class: "inbox-heading"}, node("h2", {}, "Thông báo"), button("Đóng", () => {state.inboxOpen = false; paintInbox(); state.inboxBell.focus?.();})),
+            state.inboxStatus, state.inboxRetry, state.inboxAll, state.inboxList, state.inboxMore);
+        const center = node("div", {class: "inbox-center"}, state.inboxBell, state.inboxPanel);
+        center.addEventListener("keydown", event => {if (event.key === "Escape") {state.inboxOpen = false; paintInbox(); state.inboxBell.focus?.();}});
+        paintInbox(); return center;
+    }
+    function connectNotifications() {
+        if (!config.notificationSocket || state.inboxSocket) return;
+        const url = new URL(config.notificationSocket, location.origin); url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        state.inboxSocket = E.realtime({url: url.href, token: () => state.token, Socket: WebSocket, timers: window, now: Date.now,
+            state: (_, mode) => {state.inboxMode = mode; paintInbox();}, ready: loadInbox,
+            revoked: () => clearSession("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."),
+            event: event => {
+                if (event.type === "notification.created") {
+                    const known = state.inbox.some(item => item.id === event.data.id);
+                    if (!known) {state.inbox.unshift(event.data); state.inbox = state.inbox.slice(0, 20); if (!event.data.read_at) state.unread++; paintInbox(); notify(event.data.title);
+                        if (state.user.role === "rescue_team" && event.data.type === "new_assignment") refresh();}
+                    loadInbox();
+                } else if (event.type === "notification.read") loadInbox();
+                else if (event.type === "media.optimized" && state.user.role === "citizen") refresh();
+            }});
     }
     function shell(route) {
         const role = state.user.role;
@@ -204,7 +288,8 @@
         state.notice = node("aside", {class: "view-status", "aria-live": "polite"}, node("div", {}, state.noticeTitle, state.noticeMeta), state.noticeRetry);
         const connection = node("span", {id: "connection", class: "connection", "data-state": state.connectionState, role: "status"}, state.connection);
         const isDispatch = route.startsWith("/dispatcher"), isRescue = role === "rescue_team";
-        app.replaceChildren(node("div", {id: "ui-shell", class: `shell role-${role}${isDispatch ? " dispatch-shell" : ""}${isRescue ? " rescue-shell" : ""}`}, node("aside", {class: "sidebar"}, brand(), nav, node("div", {class: "account"}, node("div", {}, node("strong", {}, state.user.username), node("br"), node("small", {}, labels[role])), logout)), node("div", {class: "workspace"}, node("header", {class: "topbar"}, node("div", {class: "workspace-title"}, icon(isRescue ? "shield" : isDispatch ? "map" : "home"), node("strong", {}, isRescue ? "Ứng cứu hiện trường" : isDispatch ? "Trung tâm điều phối" : "Trung tâm ứng phó"), node("small", {}, labels[role])), node("div", {class: "actions"}, connection, button("Làm mới", () => refresh(true)), !isRescue ? exit : null)), state.notice, content)));
+        app.replaceChildren(node("div", {id: "ui-shell", class: `shell role-${role}${isDispatch ? " dispatch-shell" : ""}${isRescue ? " rescue-shell" : ""}`}, node("aside", {class: "sidebar"}, brand(), nav, node("div", {class: "account"}, node("div", {}, node("strong", {}, state.user.username), node("br"), node("small", {}, labels[role])), logout)), node("div", {class: "workspace"}, node("header", {class: "topbar"}, node("div", {class: "workspace-title"}, icon(isRescue ? "shield" : isDispatch ? "map" : "home"), node("strong", {}, isRescue ? "Ứng cứu hiện trường" : isDispatch ? "Trung tâm điều phối" : "Trung tâm ứng phó"), node("small", {}, labels[role])), node("div", {class: "actions"}, connection, notificationCenter(), button("Làm mới", () => refresh(true)), !isRescue ? exit : null)), state.notice, content)));
+        if (state.inboxSocket && state.inboxMode === "online") loadInbox();
         return content;
     }
     function brand(tagline = "KẾT NỐI - ĐIỀU PHỐI") {
@@ -251,6 +336,7 @@
                     const data = formData(form);
                     if (registering) {await api.request("auth/register/", "POST", data); notify("Đã tạo tài khoản. Bạn có thể đăng nhập."); registering = false; updateMode(); return;}
                     const result = await api.request("auth/login/", "POST", data); state.token = result.token; state.user = result.user; sessionStorage.setItem("emergency-token", state.token);
+                    if (location.pathname === "/login") {location.replace(E.homeURL(state.user.role)); return;}
                     state.categories = await api.all("incident-categories/?page_size=100"); go(E.homes[state.user.role]); connectRealtime();
                 });
             } finally {
@@ -261,7 +347,7 @@
         const mobileBrand = node("div", {class: "auth-mobile-brand"}, brand("KẾT NỐI · ĐIỀU PHỐI"));
         app.replaceChildren(node("div", {class: "login-layout auth-layout"},
             node("section", {class: "login-story"}, brand("KẾT NỐI · ĐIỀU PHỐI"), node("div", {class: "auth-story-content"}, node("p", {class: "eyebrow"}, "Hệ thống quản lý sự cố"), node("h1", {}, "Đúng thông tin.", node("br"), "Kịp thời ứng phó."), node("p", {class: "auth-story-description"}, "Kết nối người dân, điều phối viên và đội ứng cứu trong một quy trình thống nhất."))),
-            node("main", {class: "login-form", id: "content", "aria-labelledby": "login-title"}, node("div", {class: "login-inner"}, mobileBrand, title, subtitle, form, node("p", {class: "auth-switch"}, switchPrompt, toggle)))));
+            node("main", {class: "login-form", id: "content", "aria-labelledby": "login-title"}, node("div", {class: "login-inner"}, node("a", {href: "/", class: "auth-home"}, icon("arrow"), "Trang chủ"), mobileBrand, title, subtitle, form, node("p", {class: "auth-switch"}, switchPrompt, toggle)))));
     }
     function pagination(container, data, path, setPage, reload) {
         container.replaceChildren(); if (!data.count) return;
@@ -912,9 +998,10 @@
         try {response = await fetch("/realtime/config.json");} catch (_) {throw new E.APIError(0);}
         if (!response.ok) throw new E.APIError(response.status);
         try {config = await response.json();} catch (_) {throw new E.APIError(503);}
-        api = E.apiClient({base: config.apiBase, fetcher: fetch, token: () => state.token, snapshot: () => `${state.generation}:${state.syncEpoch}`, canWrite: () => navigator.onLine !== false && (!state.user || state.user.role === "citizen" && (state.displayState === "success" || location.hash.split("?")[0] === "#/citizen/report") || (state.displayState === "success" && state.connectionState === "online")), unauthorized: () => clearSession("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.")});
-        window.addEventListener("offline", () => {state.socket?.pause(); updateConnection("Mất kết nối", "offline");});
+        api = E.apiClient({base: config.apiBase, fetcher: fetch, token: () => state.token, snapshot: () => `${state.generation}:${state.syncEpoch}`, canWrite: path => navigator.onLine !== false && (path.startsWith("notifications/") ? state.inboxMode === "online" : (!state.user || state.user.role === "citizen" && (state.displayState === "success" || location.hash.split("?")[0] === "#/citizen/report") || (state.displayState === "success" && state.connectionState === "online"))), unauthorized: () => clearSession("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.")});
+        window.addEventListener("offline", () => {state.socket?.pause(); state.inboxSocket?.pause(); state.inboxMode = "offline"; paintInbox(); updateConnection("Mất kết nối", "offline");});
         window.addEventListener("online", () => {
+            state.inboxSocket?.retry();
             if (state.socket) state.socket.retry();
             else if (state.user) {
                 state.syncEpoch++; state.connectionState = "idle";
@@ -922,9 +1009,18 @@
                 else setDisplayState("success");
             }
         });
-        window.addEventListener("hashchange", render); window.addEventListener("pagehide", () => {clearTimeout(deferredRefreshTimer); state.generation++; state.cleanups?.forEach(cleanup => cleanup()); if (state.gps) state.gps.stop(); if (state.socket) state.socket.stop(); if (state.map) state.map.destroy(); });
+        window.addEventListener("hashchange", render); window.addEventListener("pagehide", () => {clearTimeout(deferredRefreshTimer); state.generation++; state.cleanups?.forEach(cleanup => cleanup()); state.inboxSocket?.stop(); if (state.gps) state.gps.stop(); if (state.socket) state.socket.stop(); if (state.map) state.map.destroy(); });
+        // pagehide disposes live resources; a cached history restore needs a
+        // fresh auth check and REST snapshot before rejoining realtime groups.
+        window.addEventListener("pageshow", event => {if (event.persisted) location.reload();});
         document.querySelector(".skip").addEventListener("click", event => { event.preventDefault(); document.getElementById("content").focus(); });
-        if (state.token) { state.user = await api.request("auth/me/"); state.categories = await api.all("incident-categories/?page_size=100"); }
+        if (state.token) {
+            try {state.user = await api.request("auth/me/");} catch (failure) {if (failure.status !== 401) throw failure;}
+            if (state.user) {
+                if (location.pathname === "/login") {location.replace(E.homeURL(state.user.role)); return;}
+                state.categories = await api.all("incident-categories/?page_size=100");
+            }
+        }
         await render(); if (state.user) connectRealtime(); setInterval(refresh, 30000);
     } catch (error) { app.replaceChildren(node("p", {class: "error", role: "alert"}, E.publicError(error)), button("Thử lại", () => location.reload())); }
 })();

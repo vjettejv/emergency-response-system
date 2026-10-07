@@ -71,5 +71,6 @@ class MediaSerializer(serializers.ModelSerializer):
         model = MediaAsset
         fields = ("id", "media_type", "report", "incident", "uploaded_by", "filename", "content_type", "size_bytes",
                   "capture_source", "captured_at", "capture_latitude", "capture_longitude", "capture_accuracy",
-                  "status", "created_at", "upload_expires_at", "confirmed_at", "cleanup_attempts", "cleanup_error")
+                  "status", "created_at", "upload_expires_at", "confirmed_at", "cleanup_attempts", "cleanup_error",
+                  "processing_status", "optimized_size", "width", "height")
         read_only_fields = fields

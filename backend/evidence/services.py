@@ -109,7 +109,14 @@ def confirm_upload(*, actor, media_id):
         raise StorageError from exc
     asset.status = MediaAsset.Status.READY
     asset.confirmed_at = timezone.now()
-    asset.save(update_fields=["status", "confirmed_at", "version_id", "updated_at"])
+    from .images import IMAGE_TYPES
+    from .tasks import enqueue_image
+    if asset.content_type in IMAGE_TYPES:
+        asset.processing_status = MediaAsset.ProcessingStatus.PENDING
+        asset.next_processing_at = timezone.now()
+    asset.save(update_fields=["status", "confirmed_at", "version_id", "updated_at", "processing_status", "next_processing_at"])
+    if asset.processing_status == MediaAsset.ProcessingStatus.PENDING:
+        transaction.on_commit(lambda: enqueue_image(str(asset.pk)))
     from realtime.events import publish_after_commit
     if not asset.report_id or not IncidentReport.objects.filter(pk=asset.report_id, is_draft=True).exists():
         publish_after_commit(["dispatchers"], "media.confirmed", {"media_id": str(asset.pk), "report_id": asset.report_id, "incident_id": asset.incident_id})
@@ -130,11 +137,13 @@ def delete_media(*, actor, media_id):
     return asset
 
 
-def download_url(*, actor, media_id):
+def download_url(*, actor, media_id, original=False):
     asset = media_for(actor, media_id)
     if asset.status != MediaAsset.Status.READY:
         raise Conflict("Only confirmed media can be downloaded.")
     try:
-        return {"url": s3.presign_download(asset), "expires_in": settings.MEDIA_DOWNLOAD_TTL_SECONDS}
+        optimized = not original and asset.processing_status == "ready" and bool(asset.optimized_key)
+        return {"url": s3.presign_optimized(asset) if optimized else s3.presign_download(asset),
+                "expires_in": settings.MEDIA_DOWNLOAD_TTL_SECONDS, "variant": "optimized" if optimized else "original"}
     except s3.StorageUnavailable as exc:
         raise StorageError from exc

@@ -4,6 +4,7 @@ from rest_framework.exceptions import APIException, NotFound, PermissionDenied, 
 
 from accounts.models import Role
 from realtime.events import incident_changed, publish_after_commit, report_changed
+from notifications import services as notifications
 
 from .models import Incident, IncidentReport, IncidentReportLinkHistory, IncidentStatus, IncidentStatusHistory
 
@@ -56,6 +57,7 @@ def finalize_report(*, actor, report_id):
     from .clustering import submission_hint
     report.potential_duplicate_hint = submission_hint(report)
     report_changed(report)
+    notifications.report_submitted(report)
     return report
 
 
@@ -89,6 +91,7 @@ def submit_report(*, actor, category, description, location, address="", occurre
 
     report.potential_duplicate_hint = submission_hint(report)
     report_changed(report)
+    notifications.report_submitted(report)
     return report
 
 
@@ -111,6 +114,7 @@ def review_report(*, actor, report_id, review_status, note=""):
     report.review_note = note
     report.save(update_fields=["review_status", "reviewed_by", "reviewed_at", "review_note", "updated_at"])
     report_changed(report)
+    notifications.report_reviewed(report)
     return report
 
 
@@ -139,6 +143,7 @@ def create_incident_from_report(*, actor, report_id, title):
         incident=incident, report=report, actor=actor, operation=IncidentReportLinkHistory.Operation.CREATE,
     )
     incident_changed(incident)
+    notifications.report_linked(report, incident.pk)
     return incident
 
 
@@ -176,6 +181,9 @@ def link_reports(*, actor, incident_id, report_ids, note=""):
     linked_ids = [report.pk for report in reports if report.incident_id is None]
     if linked_ids:
         publish_after_commit(["dispatchers"], "reports.linked", {"incident_id": incident.pk, "report_ids": linked_ids})
+        for report in reports:
+            if report.pk in linked_ids:
+                notifications.report_linked(report, incident.pk)
     return incident
 
 
@@ -208,8 +216,9 @@ def change_incident_status(*, actor, incident_id, status, expected_status, note=
     previous = incident.status
     incident.status = status
     incident.save(update_fields=["status", "updated_at"])
-    IncidentStatusHistory.objects.create(
+    history = IncidentStatusHistory.objects.create(
         incident=incident, from_status=previous, to_status=status, changed_by=actor, note=note,
     )
     incident_changed(incident)
+    notifications.incident_updated(incident, history.pk)
     return incident

@@ -6,6 +6,7 @@ from django.db.models.functions import Coalesce
 from accounts.models import Role
 from accounts.permissions import IsCitizen, IsDispatcherOrAdmin, IsRescueTeam
 from common.pagination import StandardPagination as IncidentPagination
+from common.throttling import SafeScopedRateThrottle
 
 from . import clustering, services, contacts
 from dispatch.models import AssignmentSignal
@@ -42,6 +43,10 @@ class ReportViewSet(
     serializer_class = ReportSerializer
     pagination_class = IncidentPagination
     filter_backends = [IncidentDataFilter]
+
+    def get_throttles(self):
+        self.throttle_scope = "report_write" if self.action in ("create", "drafts", "submit") else None
+        return [SafeScopedRateThrottle()]
 
     def get_permissions(self):
         if self.action in ("retrieve", "contact"):

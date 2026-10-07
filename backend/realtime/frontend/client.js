@@ -1,6 +1,7 @@
 (function (root) {
     "use strict";
     const homes = {citizen: "/citizen/report", dispatcher: "/dispatcher", rescue_team: "/rescue", admin: "/admin/users"};
+    const homeURL = role => Object.hasOwn(homes, role) ? `/realtime/#${homes[role]}` : "/login";
     // Labels for existing API states. Transition validation remains in backend services.
     const missionActions = {
         assigned: {status: "accepted", label: "Nhận nhiệm vụ"},
@@ -46,7 +47,7 @@
     function apiClient({base, fetcher, token, unauthorized, snapshot = () => 0, canWrite = () => true}) {
         async function request(path, method = "GET", body, options = {}) {
             const version = snapshot();
-            if (method !== "GET" && !path.startsWith("auth/") && !canWrite()) throw new APIError(0);
+            if (method !== "GET" && !path.startsWith("auth/") && !canWrite(path)) throw new APIError(0);
             const origin = new URL(base, root.location ? root.location.origin : "http://test.local"), url = new URL(path, origin);
             if (url.origin !== origin.origin || !url.pathname.startsWith(origin.pathname)) throw new APIError(400, "Đường dẫn API không hợp lệ.");
             let response;
@@ -229,7 +230,7 @@
         if (!response.ok) throw new Error("Không gửi được tệp. Hãy thử lại.");
         return api.request(`media/${result.media.id}/confirm/`, "POST", {});
     }
-    const exports = {homes, allowed, describe, publicError, friendlyTime, freshPosition, APIError, apiClient, realtime, gps, distance, upload, missionAction, sheetSnap, camera, normalizePhone, validPoint, geocoding};
+    const exports = {homes, homeURL, allowed, describe, publicError, friendlyTime, freshPosition, APIError, apiClient, realtime, gps, distance, upload, missionAction, sheetSnap, camera, normalizePhone, validPoint, geocoding};
     if (typeof module !== "undefined") module.exports = exports;
     root.Emergency = exports;
 })(typeof window === "undefined" ? globalThis : window);

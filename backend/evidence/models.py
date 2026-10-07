@@ -6,6 +6,13 @@ from common.models import TimestampedModel
 
 
 class MediaAsset(TimestampedModel):
+    class ProcessingStatus(models.TextChoices):
+        NOT_REQUIRED = "not_required", "Original only"
+        PENDING = "pending", "Awaiting optimization"
+        PROCESSING = "processing", "Optimizing"
+        READY = "ready", "Optimized"
+        FAILED = "failed", "Optimization failed"
+
     class Status(models.TextChoices):
         PENDING = "pending", "Awaiting upload"
         READY = "ready", "Confirmed"
@@ -36,10 +43,22 @@ class MediaAsset(TimestampedModel):
     cleanup_attempts = models.PositiveSmallIntegerField(default=0)
     cleanup_error = models.CharField(max_length=40, blank=True)
     next_cleanup_at = models.DateTimeField()
+    # object_key, size_bytes and version_id always describe the private original.
+    optimized_key = models.CharField(max_length=255, blank=True)
+    optimized_version_id = models.CharField(max_length=1024, blank=True)
+    optimized_size = models.PositiveBigIntegerField(null=True, blank=True)
+    optimized_content_type = models.CharField(max_length=100, blank=True)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    processing_status = models.CharField(max_length=16, choices=ProcessingStatus.choices, default=ProcessingStatus.NOT_REQUIRED)
+    processing_attempts = models.PositiveSmallIntegerField(default=0)
+    processing_error = models.CharField(max_length=40, blank=True)
+    next_processing_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at", "pk"]
-        indexes = [models.Index(fields=["status", "next_cleanup_at"], name="media_cleanup_due")]
+        indexes = [models.Index(fields=["status", "next_cleanup_at"], name="media_cleanup_due"),
+                   models.Index(fields=["processing_status", "next_processing_at"], name="media_processing_due")]
         constraints = [
             models.CheckConstraint(condition=(models.Q(report__isnull=False, incident__isnull=True) | models.Q(report__isnull=True, incident__isnull=False)), name="media_exactly_one_parent"),
             models.CheckConstraint(condition=models.Q(size_bytes__gt=0), name="media_positive_size"),

@@ -45,7 +45,8 @@ class AssignmentViewSet(viewsets.ReadOnlyModelViewSet):
         return [(IsDispatcherOrAdmin | IsRescueTeam)()]
 
     def get_queryset(self):
-        queryset = services.assignments_for(self.request.user).select_related("incident").order_by("-created_at", "-pk")
+        from .timeline import with_source_times
+        queryset = with_source_times(services.assignments_for(self.request.user).select_related("incident")).order_by("-created_at", "-pk")
         if self.action == "list":
             query = AssignmentQuerySerializer(data=self.request.query_params)
             query.is_valid(raise_exception=True)

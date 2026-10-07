@@ -82,5 +82,7 @@ class ReportLocationTests(APITestCase):
         with patch("realtime.events.deliver") as delivery, self.captureOnCommitCallbacks(execute=True):
             response = self.client.post("/api/v1/incident-reports/", self.payload(), format="json")
         self.assertEqual(response.status_code, 201)
-        payload = delivery.call_args.args[1]["data"]
+        payload = next(call.args[1]["data"] for call in delivery.call_args_list if call.args[1]["type"] == "report.changed")
         self.assertEqual(set(payload), {"report_id", "review_status", "incident_id", "updated_at"})
+        for call in delivery.call_args_list:
+            self.assertNotIn(self.citizen.phone, str(call.args[1]))

@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from common.pagination import StandardPagination
 from incidents.serializers import StrictSerializer
 from . import services
+from common.throttling import SafeScopedRateThrottle
 from django.db.models import Q
 from .models import MediaAsset
 from .serializers import MediaSerializer, ParentSerializer
@@ -18,12 +19,18 @@ class PrivateResponseMixin:
 
 
 class PresignView(PrivateResponseMixin, APIView):
+    throttle_classes = [SafeScopedRateThrottle]
+    throttle_scope = "media_upload"
+
     def post(self, request):
         asset, upload = services.create_upload(actor=request.user, data=request.data)
         return Response({"media": MediaSerializer(asset).data, "upload": upload}, status=status.HTTP_201_CREATED)
 
 
 class ConfirmView(PrivateResponseMixin, APIView):
+    throttle_classes = [SafeScopedRateThrottle]
+    throttle_scope = "media_upload"
+
     def post(self, request, media_id):
         body = StrictSerializer(data=request.data)
         body.is_valid(raise_exception=True)
@@ -54,4 +61,7 @@ class MediaDetailView(PrivateResponseMixin, APIView):
 
 class DownloadView(PrivateResponseMixin, APIView):
     def get(self, request, media_id):
-        return Response(services.download_url(actor=request.user, media_id=media_id))
+        from rest_framework.exceptions import ValidationError
+        if set(request.query_params) - {"variant"} or request.query_params.get("variant", "preferred") not in ("preferred", "original"):
+            raise ValidationError("Choose preferred or original media.")
+        return Response(services.download_url(actor=request.user, media_id=media_id, original=request.query_params.get("variant") == "original"))

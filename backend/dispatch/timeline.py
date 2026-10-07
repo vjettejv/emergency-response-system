@@ -3,6 +3,20 @@ from django.db.models import Min, Max
 from django.db.models.functions import Coalesce
 
 
+def with_source_times(queryset):
+    """Fetch timeline origins in the list query instead of per assignment."""
+    from django.db.models import OuterRef, Subquery
+    from incidents.models import IncidentReport, IncidentStatusHistory
+    reports = IncidentReport.objects.filter(incident_id=OuterRef("incident_id"))
+    received = reports.annotate(value=Coalesce("submitted_at", "created_at")).order_by("value")
+    verified = reports.filter(review_status="accepted", reviewed_at__isnull=False).order_by("reviewed_at")
+    history = IncidentStatusHistory.objects.filter(incident_id=OuterRef("incident_id"), to_status="verified").order_by("changed_at")
+    return queryset.annotate(
+        source_report_created_at=Subquery(received.values("value")[:1]),
+        source_verified_at=Coalesce(Subquery(verified.values("reviewed_at")[:1]), Subquery(history.values("changed_at")[:1])),
+    )
+
+
 def source_times(incident):
     reports = incident.reports.aggregate(report_created_at=Min(Coalesce("submitted_at", "created_at")))
     verified = incident.reports.filter(review_status="accepted").aggregate(value=Min("reviewed_at"))["value"]
@@ -12,7 +26,9 @@ def source_times(incident):
 
 
 def assignment_timeline(assignment):
-    return {**source_times(assignment.incident), **{key: getattr(assignment, key) for key in (
+    origins = ({"report_created_at": assignment.source_report_created_at, "verified_at": assignment.source_verified_at}
+               if hasattr(assignment, "source_report_created_at") else source_times(assignment.incident))
+    return {**origins, **{key: getattr(assignment, key) for key in (
         "dispatched_at", "accepted_at", "en_route_at", "arrived_at", "responding_at", "completed_at")}}
 
 

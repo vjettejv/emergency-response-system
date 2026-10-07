@@ -98,6 +98,7 @@ INSTALLED_APPS = [
     "dispatch",
     "realtime",
     "evidence",
+    "notifications",
     "common",
 ]
 MIDDLEWARE = [
@@ -153,7 +154,8 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
-    "DEFAULT_THROTTLE_RATES": {"auth": "20/min", "geocoding": "30/min"},
+    "DEFAULT_THROTTLE_RATES": {"auth": "20/min", "geocoding": "30/min",
+                               "report_write": "120/min", "media_upload": "300/min", "notification": "600/min"},
     "NUM_PROXIES": 1 if PRODUCTION else None,
 }
 LANGUAGE_CODE = "vi"
@@ -188,6 +190,14 @@ MEDIA_MAX_BYTES = positive_int_env("MEDIA_MAX_BYTES", 50 * 1024 * 1024)
 MEDIA_UPLOAD_TTL_SECONDS = positive_int_env("MEDIA_UPLOAD_TTL_SECONDS", 300)
 MEDIA_DOWNLOAD_TTL_SECONDS = positive_int_env("MEDIA_DOWNLOAD_TTL_SECONDS", 300)
 MEDIA_CLEANUP_GRACE_SECONDS = positive_int_env("MEDIA_CLEANUP_GRACE_SECONDS", 120)
+MEDIA_IMAGE_MAX_DIMENSION = positive_int_env("MEDIA_IMAGE_MAX_DIMENSION", 1600)
+MEDIA_IMAGE_MAX_PIXELS = positive_int_env("MEDIA_IMAGE_MAX_PIXELS", 20000000)
+MEDIA_IMAGE_QUALITY = positive_int_env("MEDIA_IMAGE_QUALITY", 82)
+MEDIA_IMAGE_OUTPUT_FORMAT = os.environ.get("MEDIA_IMAGE_OUTPUT_FORMAT", "JPEG").upper()
+if MEDIA_IMAGE_QUALITY > 95 or MEDIA_IMAGE_MAX_DIMENSION > 4096 or MEDIA_IMAGE_MAX_PIXELS > 40000000:
+    raise ImproperlyConfigured("Image processing limits exceed safe bounds.")
+if MEDIA_IMAGE_OUTPUT_FORMAT not in ("JPEG", "WEBP"):
+    raise ImproperlyConfigured("Image output must be JPEG or WEBP.")
 if max(MEDIA_UPLOAD_TTL_SECONDS, MEDIA_DOWNLOAD_TTL_SECONDS) > 3600:
     raise ImproperlyConfigured("Media URL TTL must not exceed 3600 seconds.")
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/1")
@@ -208,6 +218,7 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_SOFT_TIME_LIMIT = 45
 CELERY_TASK_TIME_LIMIT = 60
 CELERY_BEAT_SCHEDULE = {"recover-media-cleanup": {"task": "evidence.sweep_media", "schedule": 60.0}}
+CELERY_BEAT_SCHEDULE["recover-image-processing"] = {"task": "evidence.sweep_images", "schedule": 60.0}
 
 LOGGING = {
     "version": 1, "disable_existing_loggers": False,

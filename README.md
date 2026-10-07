@@ -43,14 +43,15 @@ Báo cáo tiềm năng trùng được tìm bằng loại sự cố, trạng th�
 | Backend | Python 3.12 trong Docker; Django 5.2; Django REST Framework; GeoDjango |
 | Database | PostgreSQL/PostGIS; local dùng image `postgis/postgis:16-3.4`, production dùng AWS RDS |
 | Realtime | Django Channels, Daphne, Redis Channel Layer, WebSocket |
-| Tác vụ nền | Celery Worker + một Celery Beat; Redis broker; dọn media hết hạn/xóa media với retry giới hạn |
+| Tác vụ nền | Celery Worker + một Celery Beat; Redis broker; tối ưu ảnh và dọn media với retry giới hạn |
 | Frontend | Vanilla HTML/CSS/JavaScript, Leaflet 1.9.4, OpenStreetMap; không có npm build |
 | Địa chỉ | Adapter Nominatim qua backend, cache và giới hạn tần suất; provider cấu hình được |
-| Media | Amazon S3 private, boto3, presigned upload/download |
+| Media | Amazon S3 private, boto3, presigned upload/download; Pillow tối ưu ảnh, giữ bản gốc |
+| Thông báo | Inbox lưu trong database, read/unread và WebSocket riêng theo người nhận |
 | Triển khai | AWS EC2, Docker Compose, Nginx, HTTPS/WSS; override CloudWatch tùy chọn |
 | CI/CD | GitHub Actions, AWS OIDC/IAM, AWS Systems Manager Run Command |
 
-Các phiên bản Python dependency được pin trong [backend/requirements.txt](backend/requirements.txt). Chưa có tính tuyến đường/ETA, nén ảnh hoặc gửi notification; Celery hiện phục vụ vòng đời media.
+Các phiên bản Python dependency được pin trong [backend/requirements.txt](backend/requirements.txt). Phase 8.5 bổ sung thông báo in-app và tối ưu ảnh. Chưa có tính tuyến đường/ETA, email, SMS, mobile push hoặc transcoding video.
 
 ## Kiến trúc
 
@@ -83,7 +84,8 @@ Business logic nằm trong các service và transaction của backend. Thay đ�
 │   ├── incidents/          # Reports, incidents, clustering, contacts, geocoding
 │   ├── teams/              # Response teams và vị trí GPS
 │   ├── dispatch/           # Assignment, suggestions, timeline, history
-│   ├── evidence/           # Media lifecycle, S3 adapter, cleanup tasks
+│   ├── evidence/           # Media lifecycle, S3 adapter, tối ưu ảnh và cleanup
+│   ├── notifications/      # Inbox, read/unread, thông báo nghiệp vụ theo người nhận
 │   ├── operations/         # REST quản trị
 │   ├── common/             # Health, pagination, logging, shared utilities
 │   ├── realtime/
@@ -118,7 +120,7 @@ docker compose run --rm backend python manage.py seed_categories
 docker compose up -d backend worker beat
 ```
 
-Mở [http://localhost:8000/realtime/](http://localhost:8000/realtime/). API readiness: [http://localhost:8000/api/health/](http://localhost:8000/api/health/).
+Mở [http://localhost:8000/](http://localhost:8000/) để xem landing public; [http://localhost:8000/login](http://localhost:8000/login) để đăng nhập. API readiness: [http://localhost:8000/api/health/](http://localhost:8000/api/health/).
 
 Tạo tài khoản quản trị local khi cần:
 
@@ -128,7 +130,7 @@ docker compose exec backend python manage.py createsuperuser
 
 ### Tài khoản seed để thử nghiệm local
 
-`seed_demo` tạo các username **`demo_citizen`**, **`demo_dispatcher`**, **`demo_rescue_team`**, **`demo_admin`** và một đội giả lập. Mật khẩu lấy từ biến môi trường tạm `DEMO_PASSWORD`; không có mật khẩu mặc định trong repository, không công bố thông tin đăng nhập production. Có thể đăng ký Citizen qua giao diện.
+`seed_demo` tạo **`demo_citizen`**, **`demo_dispatcher`**, **`demo_rescue_team`**, **`demo_medical`**, **`demo_backup`**, **`demo_admin`** và ba đội với tọa độ/capability thử nghiệm. Mật khẩu lấy từ biến môi trường tạm `DEMO_PASSWORD`; không có mật khẩu mặc định trong repository, không công bố thông tin đăng nhập production. Có thể đăng ký Citizen qua giao diện.
 
 Trên PowerShell, nhập mật khẩu seed mà không ghi giá trị vào lịch sử lệnh:
 
@@ -141,7 +143,7 @@ try {
 }
 ```
 
-Lệnh giữ nguyên tài khoản, mật khẩu và dữ liệu đã tồn tại. Không chạy seed demo trên production. Khi gửi báo cáo thử, nhập họ tên và số điện thoại thử nghiệm; seed không tự cung cấp thông tin liên hệ cho Citizen.
+Lệnh giữ nguyên tài khoản, mật khẩu và trạng thái đội đã tồn tại; command bị chặn khi `DJANGO_ENV=production`. Đội đã busy/offline cần được kiểm tra trước buổi demo, không tự reset bằng seed. Khi gửi báo cáo thử, nhập họ tên và số điện thoại thử nghiệm; seed không tự cung cấp thông tin liên hệ cho Citizen.
 
 S3 cần bucket private và quyền truy cập hợp lệ để thử upload thật. Nếu chưa cấu hình, luồng media không hoạt động; không có storage giả thay thế. Camera/GPS cần quyền trình duyệt và secure context (localhost hoặc HTTPS).
 
@@ -158,6 +160,7 @@ Danh sách đầy đủ và giá trị mẫu nằm trong [.env.example](.env.exa
 | Không gian | `CLUSTER_RADIUS_METERS`, `CLUSTER_TIME_WINDOW_MINUTES`, `CLUSTER_MAX_CANDIDATES`, `DISPATCH_RADIUS_METERS`, `DISPATCH_MAX_SUGGESTIONS` |
 | Bản đồ / camera | `LEAFLET_TILE_URL`, `GEOCODER_BASE_URL`, `GEOCODER_USER_AGENT`, `GEOCODER_CACHE_SECONDS`, `INCIDENT_LOCATION_DISTANCE_WARNING_METERS`, `CAMERA_VIDEO_MAX_SECONDS` |
 | S3 / media | `AWS_REGION`, `S3_BUCKET_NAME`, `AWS_EC2_METADATA_DISABLED`, `MEDIA_MAX_BYTES`, `MEDIA_UPLOAD_TTL_SECONDS`, `MEDIA_DOWNLOAD_TTL_SECONDS`, `MEDIA_CLEANUP_GRACE_SECONDS` |
+| Tối ưu ảnh | `MEDIA_IMAGE_MAX_DIMENSION`, `MEDIA_IMAGE_MAX_PIXELS`, `MEDIA_IMAGE_QUALITY`, `MEDIA_IMAGE_OUTPUT_FORMAT` (JPEG hoặc WEBP) |
 | Production Compose | `COMPOSE_PROJECT_NAME`, `APP_IMAGE`, `APP_TAG`, `PUBLIC_HOST`, `HTTP_PORT`, `HTTPS_PORT`; `CLOUDWATCH_LOG_GROUP` khi bật override logging |
 
 EC2 dùng IAM instance role; không cần access key trong app. Khi chạy local, boto3 có thể lấy credentials từ môi trường theo `.env.example`. Upload trực tiếp cần CORS S3 cho đúng origin; URL upload/download có thời hạn, giới hạn bởi cấu hình.
@@ -174,18 +177,19 @@ REST base: `/api/v1/`. Xác thực dùng DRF Token trong header `Authorization: 
 | Điều phối | `incidents/<id>/suggested-teams/`, `incidents/<id>/assignments/`, `assignments/` |
 | GPS | `teams/me/location/`, `teams/locations/` |
 | Media | `media/presign/`, `media/`, `media/<uuid>/confirm/`, `media/<uuid>/download/`, `media/<uuid>/` |
+| Thông báo | GET `notifications/`, `notifications/unread-count/`, `notifications/<id>/`; POST/PATCH `notifications/<id>/read/`, `notifications/read-all/` |
 | Địa chỉ | `geocoding/search/`, `geocoding/reverse/` (POST, Citizen) |
 | Admin | `admin/users/`, `admin/categories/`, `admin/teams/`, `admin/configuration/` |
 
-Frontend dùng routes `/realtime/#/citizen/report`, `/realtime/#/dispatcher`, `/realtime/#/rescue`, `/realtime/#/admin/users`; login tại `/realtime/#/login` và redirect theo role.
+Trang public ở `/`, login ở `/login` (giữ `/realtime/#/login` tương thích). Frontend dùng routes `/realtime/#/citizen/report`, `/realtime/#/dispatcher`, `/realtime/#/rescue`, `/realtime/#/admin/users`; sau login redirect theo role. Landing chỉ dùng sơ đồ SVG tĩnh; không lấy dữ liệu sự cố hay mở GPS/camera/WebSocket. Phiên đã xác thực có CTA “Vào hệ thống”.
 
-WebSocket routes: **`/ws/dispatcher/`**, **`/ws/rescue/`**. Client gửi token trong frame xác thực đầu tiên; server chọn group theo quyền. Các event nghiệp vụ gồm `incident.status_changed`, `assignment.status_changed`, `team.location_updated`, `report.changed`, `reports.linked`; client reconnect và đồng bộ REST khi kết nối lại.
+WebSocket routes: **`/ws/dispatcher/`**, **`/ws/rescue/`**, **`/ws/notifications/`**. Client gửi token trong frame xác thực đầu tiên; server chọn group theo quyền. Các event nghiệp vụ gồm `incident.status_changed`, `assignment.status_changed`, `team.location_updated`, `report.changed`, `reports.linked`; client reconnect và đồng bộ REST khi kết nối lại. Inbox dùng group `user_<id>`, nhận `notification.created` và `notification.read` sau commit; chỉ người nhận có quyền xem hoặc đánh dấu đã đọc.
 
-Media đi theo luồng **metadata → presigned URL → upload trực tiếp S3 → confirm → metadata database**. Backend xác nhận object/metadata/checksum trước khi cấp quyền tải. Repository chưa có Swagger/OpenAPI UI.
+Media đi theo luồng **metadata → presigned URL → upload trực tiếp S3 → confirm → metadata database**. Backend xác nhận object/metadata/checksum trước khi cấp quyền tải. Sau confirm, Celery đọc bản gốc, kiểm tra ảnh, xoay EXIF, resize giữ tỉ lệ và tạo bản tối ưu private. Download ưu tiên bản tối ưu khi sẵn sàng, dùng bản gốc khi chưa xử lý hoặc lỗi; `?variant=original` lấy bản gốc theo cùng quyền. Task có tối đa ba lần xử lý và Beat phục hồi công việc bị gián đoạn. Media cũ giữ nguyên bản gốc. Repository chưa có Swagger/OpenAPI UI.
 
 ## Production và CI/CD
 
-Production hiện tại: [https://vjettejv.id.vn](https://vjettejv.id.vn), chạy trên EC2 bằng Docker Compose, Nginx, Django/Daphne, Redis, Celery, RDS PostgreSQL/PostGIS và S3. Database production dùng TLS `verify-full`; chỉ Nginx publish cổng ra ngoài.
+Địa chỉ deployment trước đây: [https://vjettejv.id.vn](https://vjettejv.id.vn), sử dụng EC2, Docker Compose, Nginx, Django/Daphne, Redis, Celery, RDS PostgreSQL/PostGIS và S3. Database production dùng TLS `verify-full`; chỉ Nginx publish cổng ra ngoài. Bản Phase 8.5/8.6/9 đang được xác nhận local; kết quả dưới đây không xác nhận các thay đổi này đã chạy trên AWS.
 
 Workflow [.github/workflows/ci-cd.yaml](.github/workflows/ci-cd.yaml) chạy khi push hoặc pull request vào `main`:
 
@@ -201,15 +205,34 @@ GitHub repository **Variables** đang được workflow sử dụng: `AWS_REGION
 docker compose config --quiet
 docker compose run --rm backend python manage.py check
 docker compose run --rm backend python manage.py makemigrations --check --dry-run
+docker compose run --rm backend python manage.py migrate --plan
 docker compose run --rm backend python manage.py test tests --noinput
-node --test backend/tests/frontend_realtime.test.cjs
+node --test backend/tests/frontend_realtime.test.cjs backend/tests/frontend_landing.test.cjs
 python -m unittest discover -s infra/tests
 python infra/check_repository.py --history
 ```
 
 PostGIS và Redis phải đang chạy cho backend integration tests; test runner cô lập dữ liệu Redis. S3 được kiểm tra bằng botocore Stubber; worker tests dùng queue riêng. Các test kiểm tra phân quyền, chuyển trạng thái, truy vấn không gian, concurrency, media, lỗi dịch vụ và reconnect/UI. Một số test deployment chỉ chạy trên Linux.
 
-`infra/ci.sh` chạy toàn bộ pipeline trên checkout sạch, tự tạo môi trường test và yêu cầu `COMPOSE_PROJECT_NAME` dạng `ers-ci-*`; không chạy script này trên thư mục đang chứa `.env` phát triển. Frontend không có bước build riêng.
+`infra/ci.sh` chạy toàn bộ pipeline trên checkout sạch, tự tạo môi trường test và yêu cầu `COMPOSE_PROJECT_NAME` dạng `ers-ci-*`; không chạy script này trên thư mục đang chứa `.env` phát triển. Frontend vanilla được phục vụ trực tiếp; CI chạy Node tests và `node --check` cho các file JavaScript, không có npm production build.
+
+### Kết quả Phase 9 local — 07/10/2026
+
+Backend **242/242**, frontend **62/62**, hạ tầng Linux **33/33** đã pass. Docker build, Django check, migration drift và Compose local/production overrides đều pass; local không còn migration chờ áp dụng. Các test gồm luồng REST + Redis WebSocket + notification + xử lý ảnh, race condition và phục hồi worker. S3 trong test được stub; chưa chạy production smoke cho bản này.
+
+### Final release candidate — 07/10/2026
+
+Chạy lại trên database test mới: **243/243 backend**, **62/62 frontend**, **33/33 infra Linux**, **216/216 regression** pass. Test bổ sung xác nhận JSON vượt giới hạn dung lượng bị chặn trước khi ghi báo cáo. Docker build, Django check, migration drift, JavaScript syntax, Compose và Nginx HTTP/HTTPS đều pass. DRF được cập nhật lên **3.17.2**, Daphne lên **4.2.2** để vá các advisory; `pip-audit` trên requirements và **51 dependency của Docker image** không còn finding. Frontend vanilla không có npm dependencies để audit.
+
+Preflight production xác nhận hai migration chờ triển khai chỉ thêm bảng Notification, các trường và index MediaAsset; không xóa hay đảo migration. CI/CD và production smoke của release candidate cần hoàn thành trước khi xác nhận release. Kiểm tra GPS/camera trên điện thoại thật vẫn bắt buộc; chưa tạo release tag.
+
+Benchmark tùy chọn dùng database test riêng, không gọi S3 hay production:
+
+```bash
+docker compose run --rm --no-deps backend python manage.py test tests.release_benchmark --noinput
+```
+
+Mẫu local gồm 2.000 report, 500 incident, 300 team; 370 HTTP request qua Daphne không lỗi, 40 ASGI WebSocket qua Redis nhận đủ 800 lượt event. Đây là phép đo hữu hạn trên Docker local, không xác lập sức tải AWS/WSS hoặc SLA. Có thể mount thư mục ảnh thử nghiệm chỉ đọc vào `/bench-images` để đo ảnh local; không commit ảnh, log hoặc artifact.
 
 ## Bảo mật và phạm vi
 
@@ -219,5 +242,7 @@ PostGIS và Redis phải đang chạy cho backend integration tests; test runner
 - S3 private, key do server tạo; file type/kích thước/checksum được kiểm tra, URL có hạn.
 - Production dùng HTTPS/WSS; WebSocket kiểm tra token, origin và nhóm được phép.
 - OIDC thay credentials AWS dài hạn trong CI/CD; logging tránh in token, signed URL và dữ liệu liên hệ.
+- Rate guard hiện có: auth 20/phút/IP, report write 120/phút/user, presign + confirm chung 300/phút/user, notification 600/phút/user; GPS có giới hạn khoảng cách thời gian theo đội. Cache rate guard lỗi trả 503; DRF throttle không đảm bảo quota nguyên tử dưới tải đồng thời.
+- Nginx giới hạn 40 kết nối WebSocket đồng thời/IP; các người dùng chung NAT chia sẻ giới hạn này. Redis/DB gián đoạn đóng socket với mã retryable; client reconnect rồi đồng bộ REST.
 
-Repository phục vụ đồ án và demo nghiệp vụ. Chưa bao gồm kiểm thử tải cuối cùng, notification, định tuyến/ETA hay cam kết khả dụng của một dịch vụ khẩn cấp thực tế.
+Repository phục vụ đồ án và demo nghiệp vụ. Chưa có load test production cuối cùng, email/SMS/mobile push, định tuyến/ETA hay cam kết khả dụng của một dịch vụ khẩn cấp thực tế. Camera/GPS và bản đồ nền phụ thuộc thiết bị, quyền trình duyệt và mạng; S3 private/CORS/IAM cần smoke test trên đích triển khai trước release.

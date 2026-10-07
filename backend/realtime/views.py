@@ -11,11 +11,17 @@ def frontend(request, asset="index.html"):
     if asset == "config.json":
         return JsonResponse({"apiBase": "/api/v1/", "dispatcherSocket": "/ws/dispatcher/", "rescueSocket": "/ws/rescue/", "mediaMaxBytes": settings.MEDIA_MAX_BYTES, "gpsIntervalMs": max(10, settings.GPS_MIN_INTERVAL_SECONDS) * 1000, "tileUrl": settings.LEAFLET_TILE_URL,
                              "incidentLocationDistanceWarningMeters": settings.INCIDENT_LOCATION_DISTANCE_WARNING_METERS,
-                             "cameraVideoMaxSeconds": settings.CAMERA_VIDEO_MAX_SECONDS})
-    if asset not in ("index.html", "app.js", "client.js", "map.js", "style.css"):
+                             "cameraVideoMaxSeconds": settings.CAMERA_VIDEO_MAX_SECONDS,
+                             "notificationSocket": "/ws/notifications/"})
+    if asset not in ("index.html", "app.js", "client.js", "map.js", "style.css", "theme.css", "landing.html", "landing.css", "landing.js", "landing-map.svg"):
         raise Http404
-    content_type = "text/javascript" if asset.endswith(".js") else "text/css" if asset.endswith(".css") else "text/html"
+    content_type = "text/javascript" if asset.endswith(".js") else "text/css" if asset.endswith(".css") else "image/svg+xml" if asset.endswith(".svg") else "text/html"
     response = FileResponse((Path(__file__).parent / "frontend" / asset).open("rb"), content_type=content_type)
     response["Cache-Control"] = "no-store"
     response["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
+
+
+@require_GET
+def landing(request):
+    return frontend(request, "landing.html")

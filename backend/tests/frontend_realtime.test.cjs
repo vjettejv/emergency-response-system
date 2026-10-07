@@ -70,6 +70,41 @@ test("login password visibility is accessible and preserves the typed password",
     assert.ok(!/KHÔNG GIAN LÀM VIỆC|Quên mật khẩu/.test(h.app.text));
 });
 
+test("canonical login redirects authenticated roles without fetching operational data", async () => {
+    for (const role of Object.keys(E.homes)) {
+        const h = screenHarness(role, "/login"); let destination;
+        h.context.location.pathname = "/login"; h.context.location.replace = url => {destination = url;};
+        await h.run(); assert.equal(destination, E.homeURL(role));
+        assert.ok(!h.calls.some(url => /incident-categories|incidents\/|assignments\//.test(url))); assert.equal(h.sockets.length, 0);
+    }
+});
+
+test("canonical guest login links home and redirects after successful credentials", async () => {
+    const h = screenHarness("dispatcher", "/login"), fetcher = h.context.fetch; let destination, stored;
+    h.context.location.pathname = "/login"; h.context.location.replace = url => {destination = url;};
+    h.context.sessionStorage.getItem = () => ""; h.context.sessionStorage.setItem = (_, value) => {stored = value;};
+    h.context.fetch = (url, options) => url.endsWith("auth/login/") ? Promise.resolve(response(200, {token: "synthetic-token", user: {role: "dispatcher"}})) : fetcher(url, options);
+    await h.run(); assert.equal(findUI(h.app, element => element.className === "auth-home").attrs.href, "/");
+    await findUI(h.app, element => element.tag === "form").onsubmit({preventDefault() {}}); await flushUI();
+    assert.equal(stored, "synthetic-token"); assert.equal(destination, E.homeURL("dispatcher")); assert.equal(h.sockets.length, 0);
+});
+
+test("expired session on canonical login returns to an editable login form", async () => {
+    const h = screenHarness("citizen", "/login"), fetcher = h.context.fetch; let cleared = false;
+    h.context.location.pathname = "/login";
+    h.context.sessionStorage.removeItem = () => {cleared = true;};
+    h.context.fetch = (url, options) => url.endsWith("auth/me/") ? Promise.resolve(response(401, {detail: "Synthetic expiry"})) : fetcher(url, options);
+    await h.run(); assert.equal(cleared, true); assert.match(h.app.text, /Chào mừng trở lại/);
+    assert.equal(findUI(h.app, element => element.className === "auth-submit").disabled, undefined);
+});
+
+test("history restore reboots disposed realtime resources and revalidates auth", async () => {
+    const h = screenHarness("rescue_team", "/rescue"); let reloads = 0;
+    h.context.location.reload = () => {reloads++;}; await h.run();
+    h.handlers.pageshow({persisted: false}); assert.equal(reloads, 0);
+    h.handlers.pagehide(); h.handlers.pageshow({persisted: true}); assert.equal(reloads, 1);
+});
+
 test("login prevents duplicate requests and restores controls after failure", async () => {
     const h = screenHarness("citizen", "/login"), fetcher = h.context.fetch; let release, requests = 0;
     h.context.sessionStorage.getItem = () => "";
@@ -473,7 +508,7 @@ function screenHarness(role, route, failure = false, delayDashboard = false, ass
             }
             return response(200, {count: 0, results: [], next: null});
         },
-        WebSocket: class {constructor() {this.readyState = 1; sockets.push(this);} send() {} close() {}}, setInterval() {}, clearInterval() {}, setTimeout(fn, delay) {if (delay === 450) queueMicrotask(fn);}, clearTimeout() {}, addEventListener(type, fn) {handlers[type] = fn;}, removeEventListener(type) {delete handlers[type];},
+        WebSocket: class {constructor(url) {this.url = url; this.readyState = 1; sockets.push(this);} send() {} close() {}}, setInterval() {}, clearInterval() {}, setTimeout(fn, delay) {if (delay === 450) queueMicrotask(fn);}, clearTimeout() {}, addEventListener(type, fn) {handlers[type] = fn;}, removeEventListener(type) {delete handlers[type];},
         EmergencyMap: {createMap: () => {maps++; return {replace() {}, update(kind, item) {mapUpdates.push({kind, item});}, focus() {}, destroy() {}, pick(fn) {mapPicker = fn;}, edit() {}};}},
     }); context.window = context; context.Emergency = E;
     return {app, context, calls, requests, sockets, handlers, mapUpdates, choosePoint(latitude, longitude) {mapPicker?.(latitude, longitude);}, get maps() {return maps;}, setTaskStatus(status) {assignmentStatus = status;}, releaseDashboard, async navigate(path) {location.hash = path; await handlers.hashchange();}, async run() {vm.runInContext(readFileSync(join(__dirname, "../realtime/frontend/app.js"), "utf8"), context); for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)); if (location.hash !== "#" + route && handlers.hashchange) {handlers.hashchange(); for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve));} if (sockets.length) {sockets[0].onopen(); sockets[0].onmessage({data: JSON.stringify({type: "ready"})}); for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve));}}};
@@ -483,6 +518,87 @@ test("actual role screens render report form, dashboard, rescue list and Admin d
         const h = screenHarness(role, route); await h.run(); assert.match(h.app.text, new RegExp(title)); assert.ok(!h.app.text.includes("Đang tải dữ liệu"));
         if (role !== "citizen") assert.ok(h.calls.some(url => url.includes(role === "rescue_team" ? "assignments/" : role === "admin" ? "admin/users/" : "incidents/")));
     }
+});
+
+function inboxHarness(role = "citizen") {
+    const h = screenHarness(role, role === "citizen" ? "/citizen/reports" : role === "rescue_team" ? "/rescue" : "/dispatcher"), fetcher = h.context.fetch;
+    let unavailable = false;
+    let items = [{id: 1, type: "report_received", title: "Báo cáo đã tiếp nhận", message: "Synthetic <script> text", created_at: new Date().toISOString(), read_at: null,
+                  related_entity: {kind: role === "rescue_team" ? "assignment" : "report", id: 5}}];
+    h.context.fetch = async (url, options = {}) => {
+        if (url.endsWith("config.json")) {const config = await (await fetcher(url, options)).json(); return response(200, {...config, notificationSocket: "/ws/notifications/"});}
+        if (!url.includes("/notifications/")) return fetcher(url, options);
+        h.requests.push({url, options});
+        if (unavailable) return response(503, {detail: "Synthetic failure"});
+        if (url.includes("/unread-count/")) return response(200, {count: items.filter(item => !item.read_at).length});
+        if (options.method === "POST") {
+            const id = /notifications\/(\d+)\/read/.exec(url)?.[1];
+            items = items.map(item => !id || item.id === Number(id) ? {...item, read_at: new Date().toISOString()} : item);
+            return response(200, {updated: 1});
+        }
+        return response(200, {count: items.length, results: items, next: null});
+    };
+    return {...h, setUnavailable(value) {unavailable = value;}, setItems(value) {items = value;}, get items() {return items;}, async ready() {
+        await h.run(); const socket = h.sockets.find(socket => socket.url.endsWith("/ws/notifications/"));
+        socket.onopen(); socket.onmessage({data: JSON.stringify({type: "ready"})}); await flushUI(); return socket;
+    }};
+}
+
+test("notification center shows safe unread messages for each operational role", async () => {
+    for (const role of ["citizen", "dispatcher", "rescue_team"]) {
+        const h = inboxHarness(role); await h.ready();
+        const bell = findUI(h.app, element => element.className === "secondary inbox-bell");
+        assert.match(bell.attrs["aria-label"], /1 chưa đọc/); await bell.click(); await flushUI();
+        assert.equal(findUI(h.app, element => element.id === "inbox-panel").hidden, false);
+        const item = findUI(h.app, element => element.className === "inbox-item unread");
+        assert.match(item.text, /Báo cáo đã tiếp nhận/); assert.ok(!item.text.includes("report_received"));
+        assert.equal(findUI(item, element => element.tag === "script"), undefined);
+        assert.equal(item.disabled, false);
+    }
+});
+
+test("notification realtime prepends once, marks snapshots stale and resyncs on reconnect", async () => {
+    const h = inboxHarness(); const socket = await h.ready();
+    const incoming = {id: 2, type: "incident_resolved", title: "Sự cố đã giải quyết", message: "Xem kết quả", created_at: new Date().toISOString(), read_at: null, related_entity: {kind: "report", id: 5}};
+    h.setItems([incoming, ...h.items]);
+    for (let i = 0; i < 2; i++) socket.onmessage({data: JSON.stringify({type: "notification.created", data: incoming})});
+    await flushUI();
+    const list = findUI(h.app, element => element.className === "inbox-list"); assert.equal(list.children.length, 2);
+    assert.match(list.children[0].text, /Sự cố đã giải quyết/);
+    assert.equal(findUI(h.app, element => element.className === "inbox-badge").textContent, "2");
+    socket.onclose({code: 1006});
+    assert.equal(findUI(h.app, element => element.className === "inbox-badge").hidden, true);
+    assert.match(findUI(h.app, element => element.className === "inbox-status").textContent, /Dữ liệu gần nhất/);
+    assert.equal(findUI(h.app, element => element.className === "inbox-list inbox-stale").children[0].disabled, true);
+    h.handlers.online(); const replacement = h.sockets.filter(socket => socket.url.endsWith("/ws/notifications/")).at(-1);
+    replacement.onmessage({data: JSON.stringify({type: "ready"})}); await flushUI();
+    assert.equal(findUI(h.app, element => element.className === "inbox-list").children.length, 2);
+    assert.equal(findUI(h.app, element => element.className === "inbox-badge").textContent, "2");
+});
+
+test("notification commands mark own inbox read and navigate to the role route", async () => {
+    const h = inboxHarness(); await h.ready();
+    await findUI(h.app, element => element.className === "inbox-item unread").click(); await flushUI();
+    assert.equal(h.context.location.hash, "#/citizen/reports/5");
+    assert.ok(h.requests.some(request => request.url.endsWith("notifications/1/read/") && request.options.method === "POST"));
+    assert.equal(findUI(h.app, element => element.className === "inbox-badge").hidden, true);
+    const team = inboxHarness("rescue_team"); await team.ready();
+    await findUI(team.app, element => element.tag === "button" && element.text === "Đánh dấu tất cả đã đọc").click(); await flushUI();
+    assert.ok(team.requests.some(request => request.url.endsWith("notifications/read-all/")));
+    assert.equal(findUI(team.app, element => element.className === "inbox-badge").hidden, true);
+});
+
+test("notification API failure labels old data and provides a working retry", async () => {
+    const h = inboxHarness(); const socket = await h.ready(); h.setUnavailable(true);
+    socket.onmessage({data: JSON.stringify({type: "notification.read", data: {all: true}})}); await flushUI();
+    assert.match(findUI(h.app, element => element.className === "inbox-status").textContent, /Không tải được thông báo.*Dữ liệu gần nhất/);
+    assert.equal(findUI(h.app, element => element.className === "inbox-badge").hidden, true);
+    const retry = findUI(h.app, element => element.tag === "button" && element.text === "Thử lại"); assert.equal(retry.hidden, false);
+    h.setUnavailable(false); await retry.click();
+    const replacement = h.sockets.filter(socket => socket.url.endsWith("/ws/notifications/")).at(-1);
+    replacement.onopen(); replacement.onmessage({data: JSON.stringify({type: "ready"})}); await flushUI();
+    assert.equal(findUI(h.app, element => element.className === "inbox-status").hidden, true);
+    assert.equal(findUI(h.app, element => element.className === "inbox-badge").textContent, "1");
 });
 
 test("Citizen automatically gets device address, hides coordinates/accuracy, and offers camera only", async () => {

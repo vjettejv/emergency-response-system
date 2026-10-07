@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#142e47">
+    <meta name="description" content="Nền tảng Web GIS hỗ trợ tiếp nhận báo cáo, điều phối lực lượng và giám sát xử lý sự cố theo thời gian thực. Phục vụ nghiên cứu và thử nghiệm.">
+    <title>Ứng phó · Quản lý và điều phối sự cố khẩn cấp</title>
+    <link rel="stylesheet" href="/realtime/theme.css">
+    <link rel="stylesheet" href="/realtime/landing.css">
+    <script defer src="/realtime/client.js"></script>
+    <script defer src="/realtime/landing.js"></script>
+</head>
+<body class="public-page">
+    <a class="public-skip" href="#content">Đến nội dung</a>
+    <svg class="public-symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+            <symbol id="shield" viewBox="0 0 24 28"><path d="m12 2 8 3.5v7c0 5-8 10-8 10s-8-5-8-10v-7L12 2Z" stroke-width="2.1"/><path d="M12 7.5v6" stroke-width="2.5"/><circle cx="12" cy="17.5" r="1.25" fill="currentColor" stroke="none"/></symbol>
+            <symbol id="pin" viewBox="0 0 24 24"><path d="M19 9c0 5-7 12-7 12S5 14 5 9a7 7 0 0 1 14 0Z"/><circle cx="12" cy="9" r="2.5"/></symbol>
+            <symbol id="dispatch" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4M7 9h4m3 0h3M7 13h8"/></symbol>
+            <symbol id="map" viewBox="0 0 24 24"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5Zm6-2v16m6-14v16"/></symbol>
+            <symbol id="records" viewBox="0 0 24 24"><path d="M8 4H5v17h14V4h-3M8 3h8v4H8Zm0 8h8m-8 4h6"/></symbol>
+            <symbol id="arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+        </defs>
+    </svg>
+    <header class="public-header">
+        <div class="public-container header-inner">
+            <a class="public-brand" href="/" aria-label="Ứng phó — Trang chủ">
+                <svg class="public-logo" viewBox="0 0 24 28" aria-hidden="true"><use href="#shield"/></svg>
+                <span><strong>ỨNG PHÓ</strong><small>KẾT NỐI - ĐIỀU PHỐI</small></span>
+            </a>
+            <button id="public-menu" class="public-menu" type="button" aria-controls="public-navigation" aria-expanded="false" aria-label="Mở hoặc đóng menu" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <nav id="public-navigation" class="public-navigation" aria-label="Điều hướng trang giới thiệu">
+                <a href="#trang-chu">Trang chủ</a><a href="#tinh-nang">Tính năng</a><a href="#quy-trinh">Quy trình</a><a href="#gioi-thieu">Giới thiệu</a>
+            </nav>
+            <a class="public-button header-entry" href="/login" data-entry="Đăng nhập"><span data-entry-label>Đăng nhập</span><svg aria-hidden="true"><use href="#arrow"/></svg></a>
+        </div>
+    </header>
+    <main id="content" tabindex="-1">
+        <section id="trang-chu" class="public-hero public-container" aria-labelledby="hero-title">
+            <div class="hero-copy">
+                <p class="public-eyebrow">Kết nối thông tin. Phối hợp hành động.</p>
+                <h1 id="hero-title"><span>Hệ thống quản lý và điều phối</span>Ứng phó sự cố<br><em>khẩn cấp.</em></h1>
+                <p class="hero-description">Nền tảng Web GIS hỗ trợ tiếp nhận báo cáo, điều phối lực lượng và giám sát xử lý sự cố theo thời gian thực.</p>
+                <div class="hero-actions">
+                    <a class="public-button" href="/login" data-entry="Đăng nhập hệ thống"><span data-entry-label>Đăng nhập hệ thống</span><svg aria-hidden="true"><use href="#arrow"/></svg></a>
+                    <a class="public-button public-secondary" href="#quy-trinh">Tìm hiểu quy trình</a>
+                </div>
+                <p class="hero-note">Phục vụ nghiên cứu và thử nghiệm.</p>
+            </div>
+            <figure class="hero-visual">
+                <div class="visual-heading"><span class="visual-mark"></span><strong>Không gian điều phối</strong><span class="visual-gis">Web GIS</span></div>
+                <img src="/realtime/landing-map.svg" width="620" height="560" alt="Sơ đồ liên kết vị trí sự cố, điều phối viên và đội ứng cứu trên bản đồ.">
+                <div class="visual-legend"><span><i class="incident-dot"></i>Sự cố</span><span><i class="dispatch-dot"></i>Điều phối</span><span><i class="team-dot"></i>Ứng cứu</span></div>
+                <figcaption>Sơ đồ minh hoạ · Không phải dữ liệu vận hành</figcaption>
+            </figure>
+        </section>
+        <section id="tinh-nang" class="public-features" aria-labelledby="features-title">
+            <div class="public-container">
+                <div class="section-heading"><p class="public-eyebrow">Từ hiện trường đến trung tâm</p><h2 id="features-title">Thông tin rõ ràng. Phối hợp kịp thời.</h2></div>
+                <div class="feature-grid">
+                    <article><svg class="public-icon" aria-hidden="true"><use href="#pin"/></svg><h3>Báo cáo hiện trường</h3><p>Gửi vị trí, địa chỉ và hình ảnh để điều phối viên nắm tình hình.</p></article>
+                    <article><svg class="public-icon" aria-hidden="true"><use href="#dispatch"/></svg><h3>Điều phối phù hợp</h3><p>Gợi ý đội theo khả năng ứng cứu, vị trí và trạng thái sẵn sàng.</p></article>
+                    <article><svg class="public-icon" aria-hidden="true"><use href="#map"/></svg><h3>Giám sát thời gian thực</h3><p>Theo dõi vị trí đội, nhiệm vụ và tiến độ xử lý trên bản đồ.</p></article>
+                    <article><svg class="public-icon" aria-hidden="true"><use href="#records"/></svg><h3>Dữ liệu tập trung</h3><p>Lưu báo cáo, sự cố và lịch sử xử lý trong cùng một hệ thống.</p></article>
+                </div>
+            </div>
+        </section>
+        <section id="quy-trinh" class="public-workflow public-container" aria-labelledby="workflow-title">
+            <div class="section-heading"><p class="public-eyebrow">Quy trình ứng phó</p><h2 id="workflow-title">Một luồng xử lý xuyên suốt.</h2><p>Từ báo cáo đầu tiên đến khi sự cố được giải quyết.</p></div>
+            <ol class="workflow-list">
+                <li><span class="step-number" aria-hidden="true">01</span><h3>Người dân<br>báo sự cố</h3><p>Cung cấp thông tin hiện trường.</p></li>
+                <li><span class="step-number" aria-hidden="true">02</span><h3>Điều phối viên<br>xác minh</h3><p>Kiểm tra và liên kết báo cáo.</p></li>
+                <li><span class="step-number" aria-hidden="true">03</span><h3>Phân công<br>đội ứng cứu</h3><p>Chọn lực lượng phù hợp.</p></li>
+                <li><span class="step-number" aria-hidden="true">04</span><h3>Theo dõi<br>thời gian thực</h3><p>Cập nhật vị trí và tiến độ.</p></li>
+                <li><span class="step-number" aria-hidden="true">05</span><h3>Hoàn thành<br>xử lý</h3><p>Ghi nhận kết quả ứng phó.</p></li>
+            </ol>
+        </section>
+        <section id="gioi-thieu" class="public-roles" aria-labelledby="roles-title">
+            <div class="public-container">
+                <div class="section-heading"><p class="public-eyebrow">Những người cùng phối hợp</p><h2 id="roles-title">Ba vai trò. Một mục tiêu ứng phó.</h2></div>
+                <div class="role-grid">
+                    <article><span class="role-kicker">Báo tin</span><h3>Người dân</h3><p>Báo cáo sự cố với vị trí và hình ảnh; theo dõi kết quả xử lý.</p></article>
+                    <article><span class="role-kicker">Điều hành</span><h3>Điều phối viên</h3><p>Xác minh, phân công lực lượng và giám sát quá trình ứng phó.</p></article>
+                    <article><span class="role-kicker">Hiện trường</span><h3>Đội ứng cứu</h3><p>Nhận nhiệm vụ, xem vị trí sự cố và cập nhật tiến độ cùng vị trí đội.</p></article>
+                </div>
+            </div>
+        </section>
+        <section class="public-gis public-container" aria-labelledby="gis-title">
+            <div class="gis-visual" role="img" aria-label="Minh hoạ việc theo dõi báo cáo, đội ứng cứu và tiến độ trong cùng không gian điều phối.">
+                <div class="gis-visual-title"><svg class="public-icon" aria-hidden="true"><use href="#map"/></svg><strong>Góc nhìn điều phối</strong><small>Minh hoạ</small></div>
+                <div class="gis-flow">
+                    <div><svg class="public-icon" aria-hidden="true"><use href="#pin"/></svg><span>Vị trí sự cố<small>Thông tin đã xác minh</small></span></div>
+                    <div><svg class="public-icon" aria-hidden="true"><use href="#shield"/></svg><span>Đội ứng cứu<small>Phân công và vị trí đội</small></span></div>
+                    <div><svg class="public-icon" aria-hidden="true"><use href="#records"/></svg><span>Tiến độ xử lý<small>Cập nhật từ hiện trường</small></span></div>
+                </div>
+            </div>
+            <div class="gis-copy"><p class="public-eyebrow">Không gian và thời gian thực</p><h2 id="gis-title">Điều phối trên bản đồ,<br>theo sát hiện trường.</h2><p>Nắm vị trí sự cố và lực lượng trong cùng một góc nhìn. Các cập nhật từ đội ứng cứu giúp điều phối viên theo dõi tiến độ mà không cần tải lại trang.</p><ul><li>Vị trí sự cố và đội ứng cứu</li><li>Trạng thái nhiệm vụ, tiến độ xử lý</li><li>Đề xuất báo cáo liên quan và đội phù hợp</li></ul></div>
+        </section>
+        <section class="public-final" aria-labelledby="entry-title">
+            <div class="public-container"><div><p class="public-eyebrow">Không gian của bạn</p><h2 id="entry-title">Sẵn sàng truy cập hệ thống?</h2></div><a class="public-button" href="/login" data-entry="Đăng nhập"><span data-entry-label>Đăng nhập</span><svg aria-hidden="true"><use href="#arrow"/></svg></a></div>
+        </section>
+    </main>
+    <footer class="public-footer public-container">
+        <div><strong>ỨNG PHÓ</strong><p>Hệ thống quản lý và điều phối ứng phó sự cố khẩn cấp.</p></div>
+        <div><p>Phục vụ nghiên cứu và thử nghiệm.<br>Không phải dịch vụ tiếp nhận khẩn cấp chính thức.</p><small>© <span id="public-year">2026</span> Ứng phó</small></div>
+    </footer>
+</body>
+</html>
