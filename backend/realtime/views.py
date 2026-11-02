@@ -12,8 +12,9 @@ def frontend(request, asset="index.html"):
         return JsonResponse({"apiBase": "/api/v1/", "dispatcherSocket": "/ws/dispatcher/", "rescueSocket": "/ws/rescue/", "mediaMaxBytes": settings.MEDIA_MAX_BYTES, "gpsIntervalMs": max(10, settings.GPS_MIN_INTERVAL_SECONDS) * 1000, "tileUrl": settings.LEAFLET_TILE_URL,
                              "incidentLocationDistanceWarningMeters": settings.INCIDENT_LOCATION_DISTANCE_WARNING_METERS,
                              "cameraVideoMaxSeconds": settings.CAMERA_VIDEO_MAX_SECONDS,
-                             "notificationSocket": "/ws/notifications/"})
-    if asset not in ("index.html", "app.js", "client.js", "map.js", "style.css", "theme.css", "landing.html", "landing.css", "landing.js", "landing-map.svg"):
+                             "notificationSocket": "/ws/notifications/", "routingEnabled": bool(settings.ROUTING_BASE_URL),
+                             "routingRefreshMs": settings.ROUTING_REFRESH_SECONDS * 1000})
+    if asset not in ("index.html", "app.js", "client.js", "map.js", "journeys.js", "style.css", "theme.css", "landing.html", "landing.css", "landing.js", "landing-map.svg"):
         raise Http404
     content_type = "text/javascript" if asset.endswith(".js") else "text/css" if asset.endswith(".css") else "image/svg+xml" if asset.endswith(".svg") else "text/html"
     response = FileResponse((Path(__file__).parent / "frontend" / asset).open("rb"), content_type=content_type)

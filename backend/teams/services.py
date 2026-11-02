@@ -39,5 +39,8 @@ def update_location(*, actor, data):
     team.location_updated_at = timestamp
     team.location_received_at = now
     team.save(update_fields=["last_location", "location_accuracy", "location_updated_at", "location_received_at", "updated_at"])
+    # Team lock also serializes assignment changes (dispatch locks incident/team first).
+    from .journeys import record_sample
+    record_sample(team=team, timestamp=timestamp, received_at=now)
     publish_after_commit(["dispatchers"], "team.location_updated", dict(TeamLocationSerializer(team).data))
     return team

@@ -9,7 +9,7 @@
             tiles.on("tileerror", () => onStatus("Không tải được bản đồ nền."));
             tiles.on("tileload", () => onStatus(""));
         }
-        const markers = new Map(), hidden = new Set(); let fitted = false, destroyed = false, pickCallback = null, bottomInset = 0, rightInset = 0, editKey = null, editCallback = null;
+        const markers = new Map(), hidden = new Set(), paths = new Map(); let fitted = false, destroyed = false, pickCallback = null, bottomInset = 0, rightInset = 0, editKey = null, editCallback = null;
         map.on?.("click", event => pickCallback?.(event.latlng.lat, event.latlng.lng));
         function cancel(entry) {if (entry?.frame != null) root.cancelAnimationFrame?.(entry.frame);}
         function move(entry, item) {
@@ -52,8 +52,19 @@
             if (!fitted && markers.size) { map.fitBounds(library.latLngBounds([...markers.values()].map(entry => entry.marker.getLatLng())), {maxZoom: 14, paddingTopLeft: [30, 30], paddingBottomRight: [rightInset + 30, bottomInset + 30]}); fitted = true; }
             map.invalidateSize();
         }
+        function path(kind, segments, fit = false) {
+            for (const layer of paths.get(kind) || []) map.removeLayer(layer);
+            const layers = [], positions = [];
+            for (const segment of segments) {
+                const points = segment.map(([lon, lat]) => [lat, lon]); positions.push(...points);
+                if (points.length >= 2) layers.push(library.polyline(points, {color: kind === "history" ? "#168664" : "#247cc0", weight: 4, ...(kind === "route" ? {dashArray: "9 7"} : {})}).addTo(map));
+                else if (points.length) layers.push(library.circleMarker(points[0], {radius: 4, color: "#168664"}).addTo(map));
+            }
+            paths.set(kind, layers);
+            if (fit && positions.length) {map.fitBounds(library.latLngBounds(positions), {maxZoom: 16, paddingTopLeft: [30, 30], paddingBottomRight: [rightInset + 30, bottomInset + 30]}); fitted = true;}
+        }
         function edit(kind, id, callback) {editKey = callback ? `${kind}:${id}` : null; editCallback = callback; for (const [key, entry] of markers) {if (key === editKey) entry.marker.dragging?.enable(); else entry.marker.dragging?.disable();}}
-        return {update, replace, edit, freeze() {for (const entry of markers.values()) cancel(entry);}, focus(lat, lon, zoom = true) {fitted = true; map.setView([lat, lon], zoom ? 15 : map.getZoom?.() || 15, {animate: false}); if (bottomInset || rightInset) map.panBy?.([rightInset / 2, bottomInset / 2], {animate: false});}, inset(value, right = 0) {const size = map.getSize?.() || {x: 1200, y: 900}, next = Math.max(0, Math.min(value, size.y - 100)), nextRight = Math.max(0, Math.min(right, size.x - 100)), delta = next - bottomInset, deltaRight = nextRight - rightInset; bottomInset = next; rightInset = nextRight; if (fitted) map.panBy?.([deltaRight / 2, delta / 2], {animate: false});}, pick(callback) {pickCallback = callback;}, visibility(kind, visible) {if (visible) hidden.delete(kind); else hidden.add(kind); for (const [key, entry] of markers) if (key.startsWith(kind + ":")) {if (visible) entry.marker.addTo(map); else map.removeLayer(entry.marker);}}, destroy() {destroyed = true; for (const entry of markers.values()) cancel(entry); markers.clear(); map.remove();}};
+        return {update, replace, edit, path, freeze() {for (const entry of markers.values()) cancel(entry);}, focus(lat, lon, zoom = true) {fitted = true; map.setView([lat, lon], zoom ? 15 : map.getZoom?.() || 15, {animate: false}); if (bottomInset || rightInset) map.panBy?.([rightInset / 2, bottomInset / 2], {animate: false});}, inset(value, right = 0) {const size = map.getSize?.() || {x: 1200, y: 900}, next = Math.max(0, Math.min(value, size.y - 100)), nextRight = Math.max(0, Math.min(right, size.x - 100)), delta = next - bottomInset, deltaRight = nextRight - rightInset; bottomInset = next; rightInset = nextRight; if (fitted) map.panBy?.([deltaRight / 2, delta / 2], {animate: false});}, pick(callback) {pickCallback = callback;}, visibility(kind, visible) {if (visible) hidden.delete(kind); else hidden.add(kind); for (const [key, entry] of markers) if (key.startsWith(kind + ":")) {if (visible) entry.marker.addTo(map); else map.removeLayer(entry.marker);}}, destroy() {destroyed = true; for (const entry of markers.values()) cancel(entry); markers.clear(); paths.clear(); map.remove();}};
     }
     root.EmergencyMap = {createMap};
     if (typeof module !== "undefined") module.exports = {createMap};

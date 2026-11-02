@@ -30,5 +30,5 @@ docker compose run --rm --no-deps backend python manage.py check
 docker compose run --rm --no-deps backend python manage.py migrate --noinput
 docker compose run --rm --no-deps backend python manage.py makemigrations --check --dry-run
 docker compose run --rm --no-deps backend python manage.py test tests --noinput
-node --test backend/tests/frontend_realtime.test.cjs backend/tests/frontend_landing.test.cjs
+node --test backend/tests/frontend_realtime.test.cjs backend/tests/frontend_landing.test.cjs backend/tests/frontend_journeys.test.cjs
 for source in backend/realtime/frontend/*.js; do node --check "$source"; done

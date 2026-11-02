@@ -51,7 +51,7 @@ Báo cáo tiềm năng trùng được tìm bằng loại sự cố, trạng th�
 | Triển khai | AWS EC2, Docker Compose, Nginx, HTTPS/WSS; override CloudWatch tùy chọn |
 | CI/CD | GitHub Actions, AWS OIDC/IAM, AWS Systems Manager Run Command |
 
-Các phiên bản Python dependency được pin trong [backend/requirements.txt](backend/requirements.txt). Phase 8.5 bổ sung thông báo in-app và tối ưu ảnh. Chưa có tính tuyến đường/ETA, email, SMS, mobile push hoặc transcoding video.
+Các phiên bản Python dependency được pin trong [backend/requirements.txt](backend/requirements.txt). Phase 8.5 bổ sung thông báo in-app và tối ưu ảnh. Source hiện tại bổ sung lịch sử GPS và tích hợp định tuyến/ETA OSRM có cấu hình riêng; không thay đổi stack. Chưa có email, SMS, mobile push hoặc transcoding video. Các bổ sung sau v1.0.0 cần triển khai riêng để có trên production.
 
 ## Kiến trúc
 
@@ -207,7 +207,7 @@ docker compose run --rm backend python manage.py check
 docker compose run --rm backend python manage.py makemigrations --check --dry-run
 docker compose run --rm backend python manage.py migrate --plan
 docker compose run --rm backend python manage.py test tests --noinput
-node --test backend/tests/frontend_realtime.test.cjs backend/tests/frontend_landing.test.cjs
+node --test backend/tests/frontend_realtime.test.cjs backend/tests/frontend_landing.test.cjs backend/tests/frontend_journeys.test.cjs
 python -m unittest discover -s infra/tests
 python infra/check_repository.py --history
 ```
@@ -251,4 +251,68 @@ Mẫu local gồm 2.000 report, 500 incident, 300 team; 370 HTTP request qua Dap
 - Rate guard hiện có: auth 20/phút/IP, report write 120/phút/user, presign + confirm chung 300/phút/user, notification 600/phút/user; GPS có giới hạn khoảng cách thời gian theo đội. Cache rate guard lỗi trả 503; DRF throttle không đảm bảo quota nguyên tử dưới tải đồng thời.
 - Nginx giới hạn 40 kết nối WebSocket đồng thời/IP; các người dùng chung NAT chia sẻ giới hạn này. Redis/DB gián đoạn đóng socket với mã retryable; client reconnect rồi đồng bộ REST.
 
-Repository phục vụ đồ án và demo nghiệp vụ. Chưa có load test production cuối cùng, email/SMS/mobile push, định tuyến/ETA hay cam kết khả dụng của một dịch vụ khẩn cấp thực tế. Camera/GPS và bản đồ nền phụ thuộc thiết bị, quyền trình duyệt và mạng; S3 private/CORS/IAM đã vượt qua smoke test trên production cho bản release này và cần kiểm tra lại khi đổi cấu hình.
+Repository phục vụ đồ án và demo nghiệp vụ. Chưa có load test production cuối cùng, email/SMS/mobile push, giao thông thời gian thực hay cam kết khả dụng của một dịch vụ khẩn cấp thực tế. Camera/GPS và bản đồ nền phụ thuộc thiết bị, quyền trình duyệt và mạng; S3 private/CORS/IAM đã vượt qua smoke test trên production cho bản release này và cần kiểm tra lại khi đổi cấu hình.
+
+## Lịch sử GPS, định tuyến và ETA — bổ sung sau v1.0.0
+
+### Lưu và xem lại hành trình
+
+Migration `teams/0004_gps_journeys.py` chỉ thêm `GPSJourney` và `GPSPoint`, không thay/xóa bảng hoặc migration cũ. Mỗi điểm lưu PointField geography SRID 4326 (longitude trước latitude), thời gian GPS, thời gian nhận và accuracy nếu có. Service GPS cũ cập nhật snapshot và lưu điểm trong cùng transaction, khóa đội để tuần tự hóa các lượt gửi đồng thời. Replay timestamp cũ/trùng trả 409, không tạo thêm điểm; điểm đứng yên ở thời điểm mới vẫn được lưu để biểu thị tín hiệu còn hoạt động.
+
+Hành trình thuộc ResponseTeam và Assignment đang hoạt động nếu mẫu thuộc thời gian được phân công; ngoài nhiệm vụ vẫn có hành trình riêng của đội. Đổi Assignment, dừng chia sẻ qua API hoặc khoảng mất tín hiệu lớn hơn `GPS_JOURNEY_GAP_SECONDS` tạo ranh giới hành trình. Không tạo ngược lịch sử từ snapshot trước migration. GPS bị từ chối/cũ/vượt giới hạn không được thêm vào lịch sử; không lưu offline batch vượt cửa sổ freshness hiện có.
+
+Vào **Hành trình GPS** (`/realtime/#/journeys`), chọn khoảng thời gian/đội và mở một hành trình. Dispatcher/Admin xem toàn bộ đội theo quyền hiện có; Rescue chỉ xem đội được gán, kể cả hành trình đã kết thúc; Citizen không có quyền. Mobile có menu bản đồ trên topbar. Đường thực tế màu xanh lá liền, tách đoạn khi mất dữ liệu lâu hoặc bước nhảy vượt ngưỡng tốc độ, không map-match hay nội suy qua khoảng mất tín hiệu. Điểm đơn lẻ vẫn hiển thị. Quãng đường lịch sử là tổng giữa các mẫu liên tục, không phải đồng hồ đo đường chính xác.
+
+API mặc định lọc 24 giờ, tối đa `GPS_HISTORY_MAX_DAYS` cho một lần chọn. Danh sách phân trang; chi tiết giới hạn `GPS_HISTORY_MAX_POINTS`, vượt giới hạn yêu cầu thu hẹp thời gian thay vì âm thầm cắt dữ liệu. Điểm GPS là dữ liệu nhạy cảm: response `no-store`, kiểm tra role/team ở backend. Chưa có chính sách tự xóa lịch sử; cần đặt thời hạn lưu/backup phù hợp trước vận hành dài hạn.
+
+### Cấu hình định tuyến
+
+Không có provider cũ nên source dùng adapter [OSRM Route API](https://project-osrm.org/docs/v5.24.0/api/#route-service), không thêm package Python/JavaScript hay container định tuyến. Dịch vụ trả tuyến theo mạng đường, distance và duration; GeoJSON được Leaflet vẽ bằng đường xanh dương nét đứt, tách khỏi lịch sử thực tế. Không fallback khoảng cách đường chim bay thành tuyến/ETA.
+
+Thêm vào `.env` local hoặc environment đích; file mẫu đã có các biến:
+
+```dotenv
+# Để trống: tính tuyến/ETA bị tắt rõ ràng trên UI.
+ROUTING_BASE_URL=
+ROUTING_TIMEOUT_SECONDS=5
+ROUTING_CACHE_SECONDS=30
+ROUTING_REFRESH_SECONDS=60
+ROUTING_USER_AGENT=EmergencyResponseSystem/1.0
+GPS_JOURNEY_GAP_SECONDS=300
+GPS_HISTORY_MAX_DAYS=31
+GPS_HISTORY_MAX_POINTS=10000
+GPS_HISTORY_MAX_SPEED_MPS=70
+```
+
+`ROUTING_BASE_URL` là HTTPS base URL của endpoint tương thích OSRM do bạn phê duyệt, không gồm `/route/v1/driving`, query, username/password hoặc key. Adapter này không cần API key và không tích hợp nhà cung cấp dùng key; có thể đặt OSRM sau reverse proxy HTTPS thuộc hạ tầng của bạn. Không bật public demo server mặc định. Để thử ít request với tọa độ tổng hợp công khai, có thể tạm dùng `https://router.project-osrm.org`; đọc [policy dịch vụ demo](https://github.com/Project-OSRM/osrm-backend/wiki/Api-usage-policy) trước khi dùng, không xem đây là dịch vụ production có SLA. Chọn endpoint/private gateway phù hợp trước khi gửi tọa độ đội thật: provider nhận điểm đi/đến. Không đưa khóa vào URL hoặc Git.
+
+Backend chặn redirect, giới hạn timeout/payload/hình học, validate response và trả lỗi ngắn cho unavailable/no-route. Redis cache 30 giây theo cặp tọa độ và giới hạn upstream chung 1 request/giây; API 30 request/phút/user. Cache/Redis lỗi trả trạng thái không khả dụng, không trả ETA giả. Các dịch vụ tile/geocoding vẫn dùng cấu hình riêng, không bị thay.
+
+Vào **Tìm đường** (`/realtime/#/navigation`), chọn điểm đi/đến trên map hoặc cho phép lấy vị trí hiện tại. Trong chi tiết Incident/Rescue, có thể dùng vị trí mới nhất của đội tới hiện trường; bật **Cập nhật theo vị trí đội** để tính lại quãng đường còn lại và ETA. Khi nhiều đội được giao, Dispatcher chọn đội muốn theo dõi. Backend lấy đội/đích từ Assignment được phép xem, không tin team do client gửi.
+
+Hiển thị thời lượng và giờ đến dự kiến từ duration OSRM. Tự cập nhật mặc định 60 giây (tối thiểu 30), một request đang chạy tại một thời điểm. GPS cũ, mất kết nối, lỗi route hoặc kết thúc nhiệm vụ sẽ bỏ estimate đang hiển thị; response của trang/context cũ bị bỏ qua. Routing chỉ tính khi người dùng yêu cầu/bật theo dõi, không được gọi bên trong transaction GPS. Không có thông tin giao thông realtime, ưu tiên xe khẩn cấp, chỉ dẫn từng ngã rẽ hoặc cam kết thời gian đến.
+
+### API và cách chạy
+
+| Method | Endpoint dưới `/api/v1/` | Ý nghĩa |
+| --- | --- | --- |
+| GET | `journeys/?since=<ISO8601>&until=<ISO8601>&team=<id>` | Danh sách thuộc khoảng thời gian và đội được phép; `team` tùy chọn |
+| GET | `journeys/<id>/?since=<ISO8601>&until=<ISO8601>` | Điểm và các đoạn đường thực tế, có accuracy/time |
+| POST | `teams/me/journey/stop/` với `{}` | Rescue dừng hành trình của đội mình; idempotent |
+| POST | `routes/` | Tính tuyến theo `origin` và `destination`, mỗi điểm gồm `latitude`, `longitude` |
+| POST | `assignments/<id>/route/` với `{}` | Tuyến/ETA từ vị trí đội còn mới tới Incident theo quyền Assignment |
+
+```bash
+docker compose build backend worker beat
+docker compose up -d db redis
+docker compose run --rm backend python manage.py migrate
+docker compose up -d backend worker beat
+docker compose run --rm backend python manage.py test tests.test_journeys_routing tests.test_gps --noinput
+node --test backend/tests/frontend_realtime.test.cjs backend/tests/frontend_landing.test.cjs backend/tests/frontend_journeys.test.cjs
+```
+
+Sau khi đổi `.env`, recreate backend để nạp cấu hình. Chưa cấu hình routing: UI báo rõ và GPS/history vẫn hoạt động. Source và migration đã kiểm tra local; không suy ra production tự có các bổ sung này, không tự deploy hoặc thay tag v1.0.0.
+
+Kiểm chứng local ngày 02/11/2026: full backend **264/264** (105.428 s), frontend **75/75** (890.7375 ms); infra Windows **25 pass, 8 skip phụ thuộc Linux** trên tổng 33 test. Build backend/worker/beat, Django check, migration apply/drift, Compose quiet và JS syntax pass. Test mới bao gồm GPS trùng/đồng thời/rollback, ranh giới Assignment, lịch sử sau hoàn thành, IDOR/role, no-route/timeout/Redis lỗi, ETA/freshness/late responses và giữ lựa chọn khi refresh. Provider failures được mô phỏng trong tests, không cố gây lỗi dịch vụ ngoài thực tế.
+
+Smoke local qua API thật với tọa độ tổng hợp Berlin: OSRM trả tuyến **1888 m / 260.4 s / 133 tọa độ hình học**, có giờ đến; không phải GPS điện thoại thật hoặc giao thông trực tiếp. Trình duyệt đọc lại hành trình sau reload và restart container preview; Leaflet vẽ đoạn GPS thực tế. Desktop và viewport mobile 390 px đã kiểm tra màn history/menu, không tràn ngang. Chưa kiểm chứng lại các bổ sung này trên điện thoại thật hoặc AWS production. Credential, hình chụp/log và dữ liệu fixture local để riêng, không commit.

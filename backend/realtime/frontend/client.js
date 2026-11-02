@@ -16,6 +16,7 @@
         return stops[Math.max(0, Math.min(2, index + (delta < -45 ? 1 : delta > 45 ? -1 : 0)))];
     }
     function allowed(role, route) {
+        if (["/journeys", "/navigation"].includes(route)) return ["dispatcher", "admin", "rescue_team"].includes(role);
         const dispatcher = /^\/dispatcher(?:\/(?:reports|incidents)\/\d+)?$/.test(route);
         return route === "/login" || (role === "admin" && (/^\/admin\/(?:users|categories|teams|config)$/.test(route) || dispatcher)) ||
             (role === "dispatcher" && dispatcher) || (role === "citizen" && /^\/citizen\/(?:report|reports(?:\/\d+)?)$/.test(route)) || (role === "rescue_team" && /^\/rescue(?:\/assignments\/\d+)?$/.test(route));

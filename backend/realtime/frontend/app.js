@@ -128,11 +128,29 @@
         state.sound = false; state.audio?.close(); state.audio = null;
         go("/login"); if (message) notify(message, true);
     }
+    function routeTools(container, map, assignment = () => null) {
+        if (!window.EmergencyJourneys) return null;
+        const tool = window.EmergencyJourneys.mountRoute({container, map, api, config, assignment,
+            online: () => state.connectionState === "online" && navigator.onLine !== false,
+            position: () => state.user.role === "rescue_team" ? state.currentPosition : state.routePosition});
+        state.navigation = tool; state.cleanups.push(() => tool.destroy()); return tool;
+    }
+    async function journeyPage(content, history) {
+        document.getElementById("ui-shell").classList.add("journey-shell");
+        content.classList.add("journey-page");
+        content.append(heading(history ? "Hành trình GPS" : "Tìm đường", history ? "Xem lại đường đi đã ghi nhận của đội ứng cứu." : "Chọn vị trí trên bản đồ để xem tuyến đường và thời gian dự kiến."));
+        const map = mountMap(content), area = node("div"); content.append(area);
+        if (!history) {routeTools(area, map); state.refresh = async () => {}; return;}
+        const choices = state.user.role === "rescue_team" ? [] : await api.all("teams/locations/");
+        const tool = window.EmergencyJourneys.mountHistory({container: area, map, api, teamChoices: choices, online: () => state.connectionState === "online" && navigator.onLine !== false});
+        state.historyView = tool; state.cleanups.push(() => tool.destroy()); state.refresh = () => tool.load(); await refresh();
+    }
     function updateConnection(text, status) {
         if (status !== "online" && status !== state.connectionState) state.syncEpoch++;
         state.connection = text; state.connectionState = status;
         const element = document.getElementById("connection"); if (element) { element.textContent = text; element.dataset.state = status; }
         if (status !== "online" && status !== "idle") {
+            state.navigation?.invalidate(); state.historyView?.invalidate();
             if (state.gps && state.gpsState !== "idle") state.gps.stop(); state.map?.freeze?.();
             document.querySelectorAll?.("dialog[open]")?.forEach(dialog => dialog.close());
             if (state.refreshError && state.displayState === "error") {state.noticeRetry.hidden = status === "syncing"; return;}
@@ -179,7 +197,7 @@
         if (state.user.role === "rescue_team" && !state.user.response_team) {connectNotifications(); updateConnection("Chưa được gán đội", "offline"); notify("Tài khoản chưa thuộc đội ứng cứu. Liên hệ quản trị viên để gán đội trước khi nhận nhiệm vụ hoặc chia sẻ GPS.", true); return; }
         const url = new URL(state.user.role === "rescue_team" ? config.rescueSocket : config.dispatcherSocket, location.origin); url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
         state.socket = E.realtime({url: url.href, token: () => state.token, Socket: WebSocket, timers: window, now: Date.now, state: updateConnection, ready: () => refresh(true), revoked: () => clearSession("Phiên hoặc quyền đã thay đổi. Vui lòng đăng nhập lại."), event: event => {
-            if (event.type === "team.location_updated" && state.displayState === "success" && state.map && state.user.role !== "rescue_team" && (!state.visibleTeamIds || state.visibleTeamIds.has(event.data.team_id))) state.map.update("team", event.data, event.data.name || "Đội ứng cứu");
+            if (event.type === "team.location_updated" && state.displayState === "success" && state.map && state.user.role !== "rescue_team" && (!state.visibleTeamIds || state.visibleTeamIds.has(event.data.team_id))) {state.map.update("team", event.data, event.data.name || "Đội ứng cứu"); if (state.routeTeamId === event.data.team_id) state.routePosition = event.data;}
             else if (["incident.status_changed", "assignment.status_changed", "report.changed", "reports.linked", "assignment.signal_created", "media.confirmed", "media.optimized"].includes(event.type)) {
                 const ended = (event.type === "assignment.status_changed" && ["completed", "cancelled", "rejected"].includes(event.data.status)) || (event.type === "incident.status_changed" && ["resolved", "cancelled"].includes(event.data.status));
                 if (ended) {
@@ -277,6 +295,7 @@
     function shell(route) {
         const role = state.user.role;
         const links = role === "citizen" ? [["/citizen/report", "Báo cáo mới", "plus"], ["/citizen/reports", "Báo cáo của tôi", "history"]] : role === "rescue_team" ? [["/rescue", "Trang chủ", "home"], ["/rescue?view=tasks", "Nhiệm vụ", "tasks"], ["/rescue?view=updates", "Cập nhật", "bell"], ["/rescue?view=history", "Lịch sử", "history"], ["/rescue?view=profile", "Hồ sơ", "user"]] : role === "dispatcher" ? [["/dispatcher", "Bản đồ tác chiến", "map"], ["/dispatcher?view=reports", "Tiếp nhận báo cáo", "tasks"]] : [["/admin/users", "Tài khoản & phân quyền", "user"], ["/admin/categories", "Loại sự cố", "layers"], ["/admin/teams", "Đội ứng cứu", "shield"], ["/admin/config", "Cấu hình", "tasks"], ["/dispatcher", "Điều phối", "map"]];
+        if (role !== "citizen") links.push(["/journeys", "Hành trình GPS", "history"], ["/navigation", "Tìm đường", "map"]);
         const active = path => route === path || (path === "/citizen/reports" && route.startsWith("/citizen/reports/")) || (path === "/dispatcher" && route.startsWith("/dispatcher/")) || (path === "/rescue?view=tasks" && route.startsWith("/rescue/assignments/"));
         const nav = node("nav", {"aria-label": "Điều hướng theo vai trò"}, ...links.map(([path, title, name]) => node("a", {href: "#" + path, "aria-label": title, title, class: active(path) ? "active" : "", ...(active(path) ? {"aria-current": "page"} : {})}, icon(name), node("span", {}, title))));
         const logoutSession = async () => {try {await api.request("auth/logout/", "POST", {}); clearSession();} catch (_) {clearSession("Đã đăng xuất trên thiết bị này.");}};
@@ -287,8 +306,9 @@
         state.noticeRetry = button("Thử lại", () => {if (state.socket && state.connectionState !== "online") state.socket.retry(); else if (state.refresh) refresh(true); else render();});
         state.notice = node("aside", {class: "view-status", "aria-live": "polite"}, node("div", {}, state.noticeTitle, state.noticeMeta), state.noticeRetry);
         const connection = node("span", {id: "connection", class: "connection", "data-state": state.connectionState, role: "status"}, state.connection);
+        const travelMenu = role === "citizen" ? null : node("details", {class: "tracking-menu"}, node("summary", {"aria-label": "Hành trình và tìm đường"}, icon("map")), node("div", {}, node("a", {href: "#" + E.homes[role]}, "Về trang chính"), node("a", {href: "#/journeys"}, "Hành trình GPS"), node("a", {href: "#/navigation"}, "Tìm đường")));
         const isDispatch = route.startsWith("/dispatcher"), isRescue = role === "rescue_team";
-        app.replaceChildren(node("div", {id: "ui-shell", class: `shell role-${role}${isDispatch ? " dispatch-shell" : ""}${isRescue ? " rescue-shell" : ""}`}, node("aside", {class: "sidebar"}, brand(), nav, node("div", {class: "account"}, node("div", {}, node("strong", {}, state.user.username), node("br"), node("small", {}, labels[role])), logout)), node("div", {class: "workspace"}, node("header", {class: "topbar"}, node("div", {class: "workspace-title"}, icon(isRescue ? "shield" : isDispatch ? "map" : "home"), node("strong", {}, isRescue ? "Ứng cứu hiện trường" : isDispatch ? "Trung tâm điều phối" : "Trung tâm ứng phó"), node("small", {}, labels[role])), node("div", {class: "actions"}, connection, notificationCenter(), button("Làm mới", () => refresh(true)), !isRescue ? exit : null)), state.notice, content)));
+        app.replaceChildren(node("div", {id: "ui-shell", class: `shell role-${role}${isDispatch ? " dispatch-shell" : ""}${isRescue ? " rescue-shell" : ""}`}, node("aside", {class: "sidebar"}, brand(), nav, node("div", {class: "account"}, node("div", {}, node("strong", {}, state.user.username), node("br"), node("small", {}, labels[role])), logout)), node("div", {class: "workspace"}, node("header", {class: "topbar"}, node("div", {class: "workspace-title"}, icon(isRescue ? "shield" : isDispatch ? "map" : "home"), node("strong", {}, isRescue ? "Ứng cứu hiện trường" : isDispatch ? "Trung tâm điều phối" : "Trung tâm ứng phó"), node("small", {}, labels[role])), node("div", {class: "actions"}, connection, travelMenu, notificationCenter(), button("Làm mới", () => refresh(true)), !isRescue ? exit : null)), state.notice, content)));
         if (state.inboxSocket && state.inboxMode === "online") loadInbox();
         return content;
     }
@@ -700,7 +720,7 @@
             const drawerInset = () => map.inset?.(window.innerWidth < 768 ? Math.max(0, mapPanel.getBoundingClientRect().bottom - drawer.getBoundingClientRect().top) : 0, window.innerWidth >= 768 ? drawer.getBoundingClientRect().width : 0);
             drawerInset(); window.addEventListener("resize", drawerInset); state.cleanups.push(() => window.removeEventListener("resize", drawerInset));
             let focused = false;
-            const proxy = {isOverview: true, replace(kind, items, title, click) {if (kind === "incident" || kind === "report") {items.forEach(item => map.update(kind, item, title(item), click ? () => click(item) : null)); if (!focused && items[0]?.latitude != null) {map.focus(items[0].latitude, items[0].longitude); focused = true;}}}, update: map.update, focus: map.focus};
+            const proxy = {isOverview: true, replace(kind, items, title, click) {if (kind === "incident" || kind === "report") {items.forEach(item => map.update(kind, item, title(item), click ? () => click(item) : null)); if (!focused && items[0]?.latitude != null) {map.focus(items[0].latitude, items[0].longitude); focused = true;}} else if (kind === "routepoint") map.replace(kind, items, title);}, update: map.update, focus: map.focus, path: map.path, pick: map.pick};
             state.drawerMap = proxy;
             try {if (selected.kind === "reports") await reportDetail(drawerBody, selected.id, true); else await incidentDetail(drawerBody, selected.id);} finally {if (state.drawerMap === proxy) state.drawerMap = null;}
             if (generation !== state.generation) return;
@@ -714,7 +734,10 @@
     }
     async function incidentDetail(content, id) {
         const generation = state.generation, error = errorBox(), body = node("div"), statusActions = node("div", {class: "actions"}), main = panel("Thông tin sự cố", body, statusActions), teams = node("div"), assignments = node("div"), reports = node("div"), history = node("ol", {class: "timeline"}); error.id = "page-error"; let incident;
-        content.append(heading("Chi tiết sự cố", "Xác minh, gom báo cáo và điều phối lực lượng."), error, main); const map = mountMap(main, true);
+        content.append(heading("Chi tiết sự cố", "Xác minh, gom báo cáo và điều phối lực lượng."), error, main); const map = mountMap(main, true); let routeTask = null;
+        const routingArea = node("div"), routingTeam = select("Đội cần theo dõi tuyến", "route_team", [], "", "Chọn đội");
+        content.append(routingTeam, routingArea); const navigation = routeTools(routingArea, map, () => routeTask);
+        routingTeam.querySelector("select").onchange = () => {state.routeChoice = Number(routingTeam.querySelector("select").value); refresh(true);};
         const timelineArea = node("div"), signalsArea = node("div"); content.append(disclosure("Tiến độ & thời gian phản hồi", panel(null, timelineArea)), panel("Yêu cầu từ hiện trường", signalsArea));
         const candidates = node("div"), candidatePanel = panel("Báo cáo gần hiện trường", candidates), picked = new Set();
         const linkPicked = button("Liên kết báo cáo đã chọn", event => perform(event.currentTarget, error, async () => {const report_ids = [...picked]; if (!report_ids.length) throw new Error("Chọn ít nhất một báo cáo đã xác minh."); if (!await confirm(`Liên kết ${report_ids.length} báo cáo đã chọn vào sự cố này?`)) return; await api.request(`incidents/${id}/reports/`, "POST", {report_ids}); picked.clear(); notify("Đã liên kết các báo cáo đã chọn."); await refresh();}), false);
@@ -723,6 +746,13 @@
         state.refresh = async () => {
             const [current, tasks, linked, audit, linkAudit, locations] = await Promise.all([api.request(`incidents/${id}/`), api.all(`assignments/?incident=${id}`), api.all(`incidents/${id}/reports/`), api.all(`incidents/${id}/status-history/`), api.all(`incidents/${id}/report-link-history/`), api.all("teams/locations/?page_size=100")]);
             if (generation !== state.generation) return; incident = current;
+            const activeTasks = tasks.filter(task => ["assigned", "accepted", "en_route", "on_scene", "responding"].includes(task.status));
+            const routeSelect = routingTeam.querySelector("select");
+            routeSelect.replaceChildren(...activeTasks.map(task => node("option", {value: task.id}, locations.find(team => team.team_id === task.team)?.name || "Đội được giao")));
+            routeTask = activeTasks.find(task => task.id === state.routeChoice) || activeTasks[0] || null;
+            if (routeTask) {routeSelect.value = routeTask.id; routeTask = {...routeTask, incident: current};}
+            routingTeam.hidden = activeTasks.length < 2; state.routeTeamId = routeTask?.team;
+            state.routePosition = locations.find(team => team.team_id === state.routeTeamId); navigation?.sync();
             body.replaceChildren(node("h2", {}, incidentTitle(incident)), details([["Trạng thái", badge(incident.status)], ["Loại sự cố", categoryName(incident.category)], ["Địa chỉ", incident.address || "—"]]), node("p", {class: "detail-description"}, incident.description)); map.replace("incident", [incident], () => incidentTitle(incident)); statusActions.replaceChildren();
             const [cards, lifecycle, fieldSignals] = await Promise.all([contactCards(`incidents/${id}/contacts/`, map, generation), api.request(`incidents/${id}/timeline/`), api.all(`incidents/${id}/signals/`)]); if (generation !== state.generation) return;
             body.append(...cards);
@@ -765,7 +795,7 @@
             if (state.connectionState !== "online") {notify("Chờ kết nối phục hồi để chia sẻ vị trí.", true); return;}
             state.gps.start();
         }); start.className = "primary-wide"; start.id = "gps-start";
-        content.append(node("section", {class: "gps-box"}, start, node("div", {class: "gps-status-row"}, node("p", {id: "gps-status", role: "status", "data-state": state.gpsState}, state.gpsText), node("button", {id: "gps-stop", type: "button", class: "secondary", hidden: state.gpsState === "idle", onclick: () => state.gps.stop()}, "Dừng chia sẻ"))));
+        content.append(node("section", {class: "gps-box"}, start, node("div", {class: "gps-status-row"}, node("p", {id: "gps-status", role: "status", "data-state": state.gpsState}, state.gpsText), node("button", {id: "gps-stop", type: "button", class: "secondary", hidden: state.gpsState === "idle", onclick: async () => {state.gps.stop(); try {await api.request("teams/me/journey/stop/", "POST", {});} catch (_) {notify("Đã dừng chia sẻ trên thiết bị. Hành trình sẽ tách khi tín hiệu gián đoạn.");}}}, "Dừng chia sẻ"))));
         if (!state.gps) {
             const userId = state.user.id, teamId = state.user.response_team, token = state.token;
             state.gps = E.gps({geo: navigator.geolocation, timers: window, now: Date.now, intervalMs: config.gpsIntervalMs, state: gpsStatus, send: async position => {
@@ -823,6 +853,8 @@
         detailBox.addEventListener("toggle", () => {if (detailBox.open) sheet.setSnap("expanded");});
         const secondaryArea = node("div"); sheetBody.append(detailBox, secondaryArea);
         let selected = null, mediaKey = null, sheetTask = null;
+        const routingArea = node("div"); sheetBody.append(disclosure("Tuyến đường & giờ đến dự kiến", routingArea));
+        const navigation = routeTools(routingArea, map, () => selected && E.missionAction(selected.status) ? selected : null);
         async function fieldRequest(task, kind) {
             const dialog = node("dialog"), form = node("form"), error = errorBox(), submit = node("button", {type: "submit"}, "Gửi về điều phối"), type = select(kind === "support" ? "Lực lượng cần hỗ trợ" : "Vấn đề gặp phải", kind === "support" ? "support_type" : "problem", kind === "support" ? [["fire", "Cứu hỏa"], ["medical", "Y tế"], ["rescue", "Cứu hộ"], ["other", "Lực lượng khác"]] : [["missing_location", "Không tìm thấy vị trí"], ["unreachable_contact", "Không liên hệ được người báo"], ["blocked_road", "Đường bị chặn"], ["extra_forces", "Cần thêm lực lượng"], ["more_severe", "Nghiêm trọng hơn dự kiến"]], kind === "support" ? "rescue" : "missing_location");
             // Reuse an ID only for identical retries. A changed form is a new field request.
@@ -854,6 +886,7 @@
             if (generation !== state.generation) return;
             const all = id ? [data] : data, active = all.filter(task => E.missionAction(task.status)), previous = selected;
             selected = id ? data : active[0] || (view === "home" && previous && all.find(task => task.id === previous.id && task.status === "completed"));
+            navigation?.sync();
             const contactEpoch = state.contactEpoch;
             const [contacts, entries] = selected ? await Promise.all([
                 E.missionAction(selected.status) ? api.request(`assignments/${selected.id}/contacts/`) : [],
@@ -971,7 +1004,7 @@
         }; search.onsubmit = event => { event.preventDefault(); page = null; refresh(true); }; await refresh();
     }
     async function render() {
-        state.lastUpdated = null; state.snapshotReady = false; state.refreshError = false; state.rendering = true;
+        state.lastUpdated = null; state.snapshotReady = false; state.refreshError = false; state.rendering = true; state.navigation = null; state.historyView = null; state.routePosition = null; state.routeTeamId = null; state.routeChoice = null;
         state.cleanups?.forEach(cleanup => cleanup()); state.cleanups = []; state.contactNodes = new Set(); state.contactEpoch = (state.contactEpoch || 0) + 1; state.drawerMap = null; state.destination = null; state.generation++; state.refresh = null; state.mediaGuard = null; state.visibleTeamIds = null; if (state.map) state.map.destroy(); state.map = null;
         const route = location.hash.slice(1) || (state.user ? E.homes[state.user.role] : "/login"), path = route.split("?")[0];
         if (!state.user) { if (path !== "/login") { go("/login"); return; } login(); return; }
@@ -980,7 +1013,8 @@
         const loading = node("div", {class: "loading skeleton", role: "status"}, node("span", {}, "Đang tải…"), node("i"), node("i"), node("i")); content.append(loading);
         if (window.scrollTo) window.scrollTo(0, 0);
         try {
-            if (path === "/citizen/report") citizenCreate(content);
+            if (["/journeys", "/navigation"].includes(path)) await journeyPage(content, path === "/journeys");
+            else if (path === "/citizen/report") citizenCreate(content);
             else if (path === "/citizen/reports") await reportList(content);
             else if (parts[1] === "citizen" && parts[2] === "reports" && /^\d+$/.test(parts[3] || "")) await reportDetail(content, parts[3], false);
             else if (parts[1] === "dispatcher") await dispatcher(content, new URLSearchParams(route.split("?")[1]).get("view"), parts[3] ? {kind: parts[2], id: parts[3]} : null);

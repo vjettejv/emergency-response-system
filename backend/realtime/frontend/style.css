@@ -120,4 +120,19 @@ h1,h2,h3,p{margin:0 0 12px}h1{font-size:clamp(24px,3vw,32px);letter-spacing:-.7p
 .inbox-stale{opacity:.65}
 .topbar .inbox-center button{display:inline-flex}
 .topbar .inbox-center .inbox-item{display:grid}
+.journey-page .map{height:48vh;min-height:280px;border-radius:16px}
+.route-planner,.journey-history{margin-top:16px;min-width:0}
+.route-planner .actions{display:flex;flex-wrap:wrap;gap:8px}
+.route-summary{border-left:3px dashed #247cc0;padding-left:14px;margin:12px 0}
+.route-summary:empty{display:none}.route-follow{display:flex;align-items:center;gap:8px;margin-top:12px}
+.tracking-menu{display:none;position:relative}.tracking-menu summary{list-style:none;cursor:pointer;padding:10px;border:1px solid var(--line);border-radius:12px;min-width:40px;min-height:44px}.tracking-menu summary::-webkit-details-marker{display:none}.tracking-menu>div{position:absolute;right:0;top:50px;min-width:190px;z-index:1600;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:var(--shadow)}.tracking-menu a{display:block;padding:12px;white-space:nowrap}
+@media(max-width:767px){.topbar .tracking-menu{display:block}.topbar .workspace-title{min-width:0;flex:1}.topbar .workspace-title strong{overflow-wrap:anywhere}}
+.journey-history .filters{display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+.journey-history .field{flex:1 1 180px;min-width:0}.journey-history input,.journey-history select{max-width:100%}
+.rescue-content.journey-page{padding:18px}.journey-history .record{margin:10px 0}
+.rescue-shell .sidebar nav{grid-template-columns:repeat(7,minmax(0,1fr));max-width:850px}
+.journey-shell .content{height:auto;overflow:visible;min-width:0}.journey-shell .workspace{min-width:0}
+@media(max-width:767px){.journey-shell .topbar .actions>button:not(.account-exit){display:none}.journey-shell .topbar{padding:10px 12px;gap:8px;min-height:62px;height:auto}.journey-shell .workspace-title strong{font-size:12px;line-height:1.35}.journey-shell .topbar .actions{gap:6px}}
+@media(max-width:767px){.journey-shell{display:block}.journey-shell .sidebar{display:none}.journey-shell .workspace{margin:0}.journey-shell .content{padding:18px 16px 90px}.journey-shell .topbar{position:sticky;top:0;z-index:1400}.journey-shell .workspace-title small{display:none}}
+@media(max-width:767px){.journey-page .map{height:38vh}.route-planner .actions button{flex:1 1 145px;white-space:normal}.journey-history .filters>*{max-width:100%}.rescue-shell .sidebar nav{overflow-x:auto;justify-content:flex-start}.rescue-shell .sidebar nav a{flex:0 0 68px}}
 @media(max-width:767px){.inbox-panel{position:fixed;top:78px;left:16px;right:16px;width:auto;max-height:calc(100dvh - 110px)}.topbar .actions{gap:8px}.topbar .inbox-center{display:block}}

@@ -460,7 +460,7 @@ function screenHarness(role, route, failure = false, delayDashboard = false, ass
     let releaseDashboard;
     const dashboardGate = new Promise(resolve => {releaseDashboard = resolve;});
     class Element {
-        constructor(tag) {this.tag = tag; this.nodeType = 1; this.children = []; this.attrs = {}; this.value = ""; this.name = ""; this.id = ""; this.textContent = ""; this.className = ""; this.dataset = {};}
+        constructor(tag) {this.tag = tag; this.nodeType = 1; this.children = []; this.attrs = {}; this.value = ""; this.name = ""; this.id = ""; this.textContent = ""; this.className = ""; this.dataset = {}; this.classList = {add: name => {this.className += " " + name;}};}
         append(...nodes) {nodes.forEach(node => {node.parentElement = this; this.children.push(node);});}
         replaceChildren(...nodes) {this.children = []; this.append(...nodes);}
         addEventListener(type, fn) {this["on" + type] = fn;}
@@ -798,4 +798,66 @@ test("GPS marker interpolation cancels superseded frames, supports layers, and s
         controller.update("team", {team_id: 1, latitude: 24, longitude: 105, timestamp: "2026-10-04T10:03:00Z"}, "Demo");
         const late = [...frames.values()].at(-1); controller.destroy(); late(performance.now() + 500); assert.equal(point.lat, 23);
     } finally {global.document = saved.document; global.requestAnimationFrame = saved.request; global.cancelAnimationFrame = saved.cancel;}
+});
+
+test("journey screen reads persisted history, filters time and draws a recorded track", async () => {
+    const h = screenHarness("dispatcher", "/journeys"), fetcher = h.context.fetch, paths = [];
+    vm.runInContext(readFileSync(join(__dirname, "../realtime/frontend/journeys.js"), "utf8"), h.context);
+    const makeMap = h.context.EmergencyMap.createMap;
+    h.context.EmergencyMap.createMap = () => ({...makeMap(), path: (...args) => paths.push(args)});
+    h.context.fetch = async (url, options) => {
+        if (url.includes("journeys/9/")) return response(200, {points: [{latitude:21,longitude:105}], segments: [[[105,21]]], distance_meters:0});
+        if (url.includes("journeys/?")) return response(200, {count:1, results:[{id:9,team_name:"Synthetic team",incident_title:"Synthetic mission",started_at:new Date().toISOString(),last_recorded_at:new Date().toISOString(),tracking_state:"ended"}], next:null});
+        return fetcher(url,options);
+    };
+    await h.run();
+    assert.match(h.app.text, /Synthetic team/);
+    await findUI(h.app, e => e.tag === "button" && e.text === "Xem đường đi thực tế").click(); await flushUI();
+    assert.match(h.app.text,/Lịch sử GPS đã lưu/); assert.ok(paths.some(([kind,segments])=>kind === "history" && segments.length));
+    await findUI(h.app, e => e.tag === "button" && e.text === "Làm mới").click(); await flushUI();
+    assert.match(h.app.text,/1 điểm đã ghi nhận/);
+    assert.ok(h.calls.every(url=>!url.includes("/routes/")));
+    h.sockets[0].onclose({code:1006});
+    assert.ok(!h.app.text.includes("1 điểm đã ghi nhận"));
+});
+
+test("route picker submits selected coordinates through the shared API and hides ETA after error", async () => {
+    const h = screenHarness("dispatcher", "/navigation"), fetcher = h.context.fetch; let fail = false, sent;
+    vm.runInContext(readFileSync(join(__dirname, "../realtime/frontend/journeys.js"), "utf8"), h.context);
+    h.context.fetch = async (url,options={}) => {
+        if (url.endsWith("config.json")) return response(200,{...(await (await fetcher(url,options)).json()),routingEnabled:true});
+        if (url.endsWith("routes/")) {sent=JSON.parse(options.body); return fail ? response(503,{detail:"private provider error"}) : response(200,{distance_meters:2500,duration_seconds:180,estimated_arrival_at:new Date().toISOString(),geometry:{coordinates:[[105,21],[106,22]]}});}
+        return fetcher(url,options);
+    };
+    await h.run();
+    await findUI(h.app,e=>e.tag==="button" && e.text==="Chọn điểm đi trên bản đồ").click(); h.choosePoint(21,105);
+    await findUI(h.app,e=>e.tag==="button" && e.text==="Chọn điểm đến trên bản đồ").click(); h.choosePoint(22,106);
+    await findUI(h.app,e=>e.tag==="button" && e.text==="Tìm tuyến đường").click(); await flushUI();
+    assert.deepEqual(sent,{origin:{latitude:21,longitude:105},destination:{latitude:22,longitude:106}});
+    assert.match(h.app.text,/2.5 km/); assert.match(h.app.text,/Dự kiến đến/);
+    fail=true; await findUI(h.app,e=>e.tag==="button" && e.text==="Tìm tuyến đường").click(); await flushUI();
+    assert.ok(!h.app.text.includes("Dự kiến đến")); assert.ok(!h.app.text.includes("private provider"));
+});
+
+test("route UI clearly disables unconfigured routing instead of showing sample directions", async () => {
+    const h = screenHarness("rescue_team", "/navigation");
+    vm.runInContext(readFileSync(join(__dirname, "../realtime/frontend/journeys.js"), "utf8"), h.context);
+    await h.run(); assert.match(h.app.text,/chưa được cấu hình/);
+    assert.equal(findUI(h.app,e=>e.tag==="button" && e.text==="Tìm tuyến đường").disabled,true);
+    assert.ok(!h.app.text.includes("Dự kiến đến"));
+});
+
+test("Rescue mission uses scoped assignment routing and removes ETA when the assignment ends", async () => {
+    const h=screenHarness("rescue_team","/rescue",false,false,"en_route"), fetcher=h.context.fetch;
+    vm.runInContext(readFileSync(join(__dirname,"../realtime/frontend/journeys.js"),"utf8"),h.context);
+    h.context.fetch=async(url,options={})=>{
+        if(url.endsWith("config.json")) return response(200,{...(await(await fetcher(url,options)).json()),routingEnabled:true});
+        if(url.endsWith("assignments/5/route/")) return response(200,{distance_meters:1800,duration_seconds:200,estimated_arrival_at:new Date().toISOString(),geometry:{coordinates:[[105,21],[105.01,21]]}});
+        return fetcher(url,options);
+    };
+    await h.run();
+    await findUI(h.app,e=>e.tag==="button" && e.text==="Tìm tuyến đường").click(); await flushUI();
+    assert.match(h.app.text,/Dự kiến đến/);
+    h.setTaskStatus("completed"); h.sockets[0].onmessage({data:JSON.stringify({type:"assignment.status_changed",data:{status:"completed"}})}); await flushUI();
+    assert.ok(!h.app.text.includes("Dự kiến đến"));
 });

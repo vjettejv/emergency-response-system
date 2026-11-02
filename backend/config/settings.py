@@ -49,6 +49,16 @@ DISPATCH_MAX_SUGGESTIONS = positive_int_env("DISPATCH_MAX_SUGGESTIONS", 20)
 GPS_MIN_INTERVAL_SECONDS = positive_int_env("GPS_MIN_INTERVAL_SECONDS", 5)
 GPS_MAX_AGE_SECONDS = positive_int_env("GPS_MAX_AGE_SECONDS", 120)
 GPS_FUTURE_TOLERANCE_SECONDS = positive_int_env("GPS_FUTURE_TOLERANCE_SECONDS", 30)
+GPS_JOURNEY_GAP_SECONDS = positive_int_env("GPS_JOURNEY_GAP_SECONDS", 300)
+GPS_HISTORY_MAX_DAYS = positive_int_env("GPS_HISTORY_MAX_DAYS", 31)
+GPS_HISTORY_MAX_POINTS = positive_int_env("GPS_HISTORY_MAX_POINTS", 10000)
+GPS_HISTORY_MAX_SPEED_MPS = positive_int_env("GPS_HISTORY_MAX_SPEED_MPS", 70)
+# Opt-in OSRM-compatible HTTPS endpoint. No public demo is contacted by default.
+ROUTING_BASE_URL = os.environ.get("ROUTING_BASE_URL", "").rstrip("/")
+ROUTING_TIMEOUT_SECONDS = positive_int_env("ROUTING_TIMEOUT_SECONDS", 5)
+ROUTING_CACHE_SECONDS = positive_int_env("ROUTING_CACHE_SECONDS", 30)
+ROUTING_REFRESH_SECONDS = max(30, positive_int_env("ROUTING_REFRESH_SECONDS", 60))
+ROUTING_USER_AGENT = os.environ.get("ROUTING_USER_AGENT", "EmergencyResponseSystem/1.0")
 WS_AUTH_TIMEOUT_SECONDS = 5
 WS_HEARTBEAT_SECONDS = 30
 WS_ALLOWED_ORIGINS = list_env("WS_ALLOWED_ORIGINS", "" if PRODUCTION else "http://localhost:8000,http://127.0.0.1:8000")
@@ -154,7 +164,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
-    "DEFAULT_THROTTLE_RATES": {"auth": "20/min", "geocoding": "30/min",
+    "DEFAULT_THROTTLE_RATES": {"auth": "20/min", "geocoding": "30/min", "routing": "30/min",
                                "report_write": "120/min", "media_upload": "300/min", "notification": "600/min"},
     "NUM_PROXIES": 1 if PRODUCTION else None,
 }
