@@ -34,6 +34,7 @@ class RemoteDeploymentTests(unittest.TestCase):
         self.deployment.command = Mock(side_effect=command)
         self.deployment.snapshot = Mock(return_value=[['incidents', '0001_initial']])
         self.deployment.run_compose_deploy = Mock()
+        self.deployment.verify_routing = Mock()
 
     def execute(self):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -128,6 +129,81 @@ class RemoteDeploymentTests(unittest.TestCase):
         self.assertEqual(self.execute(), 1)
         self.assertFalse(self.deployment.changed)
         self.deployment.run_compose_deploy.assert_not_called()
+
+    def runtime(self, configuration):
+        directory = self.root / 'infra'
+        directory.mkdir(exist_ok=True)
+        (directory / 'production-runtime.json').write_text(json.dumps(configuration))
+
+    def test_routing_configuration_is_applied_to_environment_after_checkout(self):
+        self.runtime({'ROUTING_BASE_URL': 'https://routing.example.invalid', 'ROUTING_REFRESH_SECONDS': 60})
+        self.assertEqual(self.execute(), 0)
+        content = (self.root / '.env.production').read_text()
+        self.assertIn("APP_TAG='" + 'b' * 40 + "'", content)
+        self.assertIn('PUBLIC_HOST=example.invalid', content)
+        self.assertIn("ROUTING_BASE_URL='https://routing.example.invalid'", content)
+        self.assertIn("ROUTING_REFRESH_SECONDS='60'", content)
+        self.deployment.verify_routing.assert_called_once()
+        if os.name == 'posix':
+            self.assertEqual((self.root / '.env.production').stat().st_mode & 0o777, 0o600)
+
+    def test_invalid_runtime_configuration_does_not_modify_environment(self):
+        original = (self.root / '.env.production').read_text()
+        valid = {'ROUTING_BASE_URL': 'https://routing.example.invalid', 'ROUTING_REFRESH_SECONDS': 60}
+        for configuration in (
+            {**valid, 'ROUTING_BASE_URL': 'http://routing.example.invalid'},
+            {**valid, 'ROUTING_BASE_URL': 'https://routing.example.invalid?key=not-a-key'},
+            {**valid, 'ROUTING_BASE_URL': 'https://routing.example.invalid\nOTHER=bad'},
+            {**valid, 'ROUTING_BASE_URL': 'https://routing.example.invalid:bad'},
+            {**valid, 'ROUTING_REFRESH_SECONDS': 1},
+            {**valid, 'ROUTING_REFRESH_SECONDS': True},
+            {**valid, 'UNAPPROVED_SETTING': 'forbidden'},
+            [],
+        ):
+            self.runtime(configuration)
+            with self.subTest(configuration=configuration), self.assertRaises(ssm_remote.DeploymentFailure):
+                self.deployment.apply_runtime_configuration()
+            self.assertEqual((self.root / '.env.production').read_text(), original)
+
+    def test_duplicate_routing_keys_fail_closed(self):
+        environment = self.root / '.env.production'
+        environment.write_text("APP_TAG='" + 'a' * 40 + "'\nROUTING_BASE_URL=\nROUTING_BASE_URL=\n")
+        original = environment.read_text()
+        self.runtime({'ROUTING_BASE_URL': '', 'ROUTING_REFRESH_SECONDS': 60})
+        with self.assertRaises(ssm_remote.DeploymentFailure):
+            self.deployment.apply_runtime_configuration()
+        self.assertEqual(environment.read_text(), original)
+
+    def test_failure_restores_previous_runtime_configuration_before_recovery(self):
+        original = (self.root / '.env.production').read_text()
+        self.runtime({'ROUTING_BASE_URL': 'https://routing.example.invalid', 'ROUTING_REFRESH_SECONDS': 60})
+        self.deployment.verify_routing.side_effect = ssm_remote.DeploymentFailure('routing_smoke_failed')
+        self.assertEqual(self.execute(), 1)
+        self.assertEqual(self.deployment.rollback, 'success')
+        self.assertEqual((self.root / '.env.production').read_text(), original)
+
+    def test_disabled_routing_is_written_explicitly(self):
+        self.runtime({'ROUTING_BASE_URL': '', 'ROUTING_REFRESH_SECONDS': 90})
+        self.deployment.apply_runtime_configuration()
+        self.assertIn("ROUTING_BASE_URL=''", (self.root / '.env.production').read_text())
+
+    @patch('time.sleep')
+    def test_routing_smoke_success_exposes_only_safe_marker(self, sleep):
+        self.deployment.runtime_configuration = {'ROUTING_BASE_URL': 'https://routing.example.invalid'}
+        self.deployment.command = Mock(return_value=json.dumps({'configured': True, 'route_ok': True, 'traffic_aware': False}))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            ssm_remote.Deployment.verify_routing(self.deployment)
+        self.assertEqual(output.getvalue().strip(), 'DEPLOY|routing_verified')
+
+    @patch('time.sleep')
+    def test_routing_failure_retries_are_bounded_and_sanitized(self, sleep):
+        self.deployment.runtime_configuration = {'ROUTING_BASE_URL': 'https://routing.example.invalid'}
+        self.deployment.command = Mock(side_effect=ssm_remote.DeploymentFailure('routing_smoke'))
+        with self.assertRaisesRegex(ssm_remote.DeploymentFailure, '^routing_smoke_failed$'):
+            ssm_remote.Deployment.verify_routing(self.deployment)
+        self.assertEqual(self.deployment.command.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
 
 
 class CheckoutPreservationTests(unittest.TestCase):

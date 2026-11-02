@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlsplit
 
 
 MIGRATION_QUERY = (
@@ -37,6 +38,8 @@ class Deployment:
         self.directory = self.root / 'artifacts' / 'deploy'
         self.phase_file = None
         self.plan_file = None
+        self.environment_before = None
+        self.runtime_configuration = None
 
     def command(self, arguments, step, environment=None, pass_fds=()):
         result = subprocess.run(arguments, cwd=self.root, capture_output=True, text=True,
@@ -119,6 +122,88 @@ class Deployment:
         temporary.chmod(0o600)
         temporary.replace(path)
 
+    def replace_environment(self, content):
+        path = self.root / '.env.production'
+        if path.is_symlink():
+            raise DeploymentFailure('environment_symlink')
+        with tempfile.NamedTemporaryFile(mode='w', dir=self.root, prefix='.env.production.', delete=False) as stream:
+            os.chmod(stream.name, 0o600)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+            temporary = Path(stream.name)
+        temporary.replace(path)
+
+    def apply_runtime_configuration(self):
+        """Copy only approved non-secret settings from the exact deployed commit."""
+        path = self.root / 'infra' / 'production-runtime.json'
+        if not path.exists():
+            return
+        try:
+            if path.is_symlink() or path.stat().st_size > 4096:
+                raise ValueError
+            configuration = json.loads(path.read_text())
+            if not isinstance(configuration, dict) or set(configuration) != {'ROUTING_BASE_URL', 'ROUTING_REFRESH_SECONDS'}:
+                raise ValueError
+            base, interval = configuration['ROUTING_BASE_URL'], configuration['ROUTING_REFRESH_SECONDS']
+            if not isinstance(base, str) or len(base) > 2048 or any(c.isspace() or ord(c) < 32 or c in "'\"\\$`" for c in base):
+                raise ValueError
+            parsed = urlsplit(base)
+            if base and (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment):
+                raise ValueError
+            if base and (not re.fullmatch(r'[A-Za-z0-9.-]+', parsed.hostname) or parsed.port is not None and not 1 <= parsed.port <= 65535):
+                raise ValueError
+            if isinstance(interval, bool) or not isinstance(interval, int) or not 30 <= interval <= 3600:
+                raise ValueError
+            environment = self.root / '.env.production'
+            if environment.is_symlink():
+                raise ValueError
+            original = environment.read_text()
+            lines = original.splitlines()
+            for name, value in configuration.items():
+                if sum(line.startswith(name + '=') for line in lines) > 1:
+                    raise ValueError
+                # Quote as dotenv data, never source it as a shell command.
+                quoted = "'" + str(value).replace('\\', '\\\\').replace("'", "\\'") + "'"
+                if any(line.startswith(name + '=') for line in lines):
+                    lines = [name + '=' + quoted if line.startswith(name + '=') else line for line in lines]
+                else:
+                    lines.append(name + '=' + quoted)
+        except (ValueError, TypeError, OSError):
+            raise DeploymentFailure('runtime_configuration_invalid') from None
+        self.environment_before = original
+        self.replace_environment('\n'.join(lines) + '\n')
+        self.runtime_configuration = configuration
+        print('DEPLOY|runtime_configuration_applied', flush=True)
+
+    def verify_routing(self):
+        if not self.runtime_configuration or not self.runtime_configuration['ROUTING_BASE_URL']:
+            return
+        # Only public synthetic coordinates are sent. No account, report or GPS record is created.
+        query = (
+            "import os,json; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings'); "
+            "import django; django.setup(); from django.conf import settings; from types import SimpleNamespace; "
+            "from teams.routing import route_between; "
+            "result=route_between(actor=SimpleNamespace(is_authenticated=True,is_active=True,role='dispatcher'), "
+            "origin={'longitude':13.388860,'latitude':52.517037}, "
+            "destination={'longitude':13.397634,'latitude':52.529407}); "
+            "print(json.dumps({'configured':bool(settings.ROUTING_BASE_URL), "
+            "'route_ok':result['distance_meters']>0 and result['duration_seconds']>0 and "
+            "len(result['geometry']['coordinates'])>=2, 'traffic_aware':result['traffic_aware']}))"
+        )
+        import time
+        for attempt in range(3):
+            try:
+                result = json.loads(self.command(self.compose() + ['exec', '-T', 'backend', 'python', '-c', query], 'routing_smoke'))
+                if result == {'configured': True, 'route_ok': True, 'traffic_aware': False}:
+                    print('DEPLOY|routing_verified', flush=True)
+                    return
+            except (DeploymentFailure, ValueError, TypeError):
+                pass
+            if attempt < 2:
+                time.sleep(2)
+        raise DeploymentFailure('routing_smoke_failed')
+
     def state(self, status):
         data = {'status': status, 'previous_sha': self.previous, 'deploy_sha': self.sha,
                 'phase': self.phase, 'migration_state': self.migration_state, 'rollback': self.rollback}
@@ -142,6 +227,13 @@ class Deployment:
         print('ROLLBACK|containers_and_https_ok' if rollback else 'DEPLOY|containers_and_https_ok', flush=True)
 
     def recover(self):
+        if self.environment_before is not None:
+            try:
+                self.replace_environment(self.environment_before)
+            except Exception:
+                self.rollback = 'config_restore_failed_requires_manual_recovery'
+                self.state('failed')
+                return
         if not self.changed:
             self.state('failed_before_checkout')
             return
@@ -199,9 +291,11 @@ class Deployment:
             self.preserve_local_readme()
             self.command(['git', 'switch', '--detach', '--no-overwrite-ignore', self.sha], 'exact_commit_checkout')
             self.changed = True
+            self.apply_runtime_configuration()
             self.phase = 'compose'
             self.state('running')
             self.run_compose_deploy(self.sha)
+            self.verify_routing()
             self.migration_state = 'changed' if self.snapshot() != self.baseline else 'unchanged'
             self.persist_tag(self.sha)
             self.phase = 'complete'

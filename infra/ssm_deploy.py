@@ -60,7 +60,7 @@ def print_safe_output(invocation):
     allowed = {'DEPLOY|compose_starting', 'DEPLOY|containers_and_https_ok', 'ROLLBACK|starting',
                'ROLLBACK|containers_and_https_ok', 'DEPLOY|another_deployment_is_active', 'DEPLOY|must_run_as_ubuntu',
                'DEPLOY|internal_failure_requires_manual_inspection', 'DEPLOY|legacy_lock_ownership_repaired',
-               'DEPLOY|local_readme_preserved'}
+               'DEPLOY|local_readme_preserved', 'DEPLOY|runtime_configuration_applied', 'DEPLOY|routing_verified'}
     for name in ('StandardOutputContent', 'StandardErrorContent'):
         for line in invocation.get(name, '').splitlines():
             if line in allowed or re.fullmatch(r'DEPLOY\|failed_step=[a-z_]+', line):

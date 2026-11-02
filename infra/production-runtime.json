@@ -1,0 +1,4 @@
+{
+  "ROUTING_BASE_URL": "https://router.project-osrm.org",
+  "ROUTING_REFRESH_SECONDS": 60
+}
